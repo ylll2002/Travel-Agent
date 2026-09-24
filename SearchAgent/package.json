@@ -1,0 +1,8 @@
+{
+  "name": "searchagent-flyai-tools",
+  "private": true,
+  "version": "0.1.0",
+  "dependencies": {
+    "@fly-ai/flyai-cli": "^1.0.16"
+  }
+}

@@ -56,3 +56,28 @@ export interface ChatResponse {
   reply: string;
 }
 
+export interface UserProfile {
+  age_group: string;
+  mbti: string;
+  city: string;
+  companion: string[];
+  pace: string[];
+  budget: string[];
+  accommodation: string[];
+  transport: string[];
+  interests: string[];
+  dietary: string[];
+}
+
+export interface TripInfo {
+  destination: string;
+  origin: string;
+  start_date: string;
+  end_date: string;
+  travelers: string;
+  companions: string[];
+  budget_tiers: string[];
+  total_budget: string;
+  purposes: string[];
+  special_needs: string[];
+}

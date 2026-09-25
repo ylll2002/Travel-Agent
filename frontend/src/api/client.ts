@@ -4,6 +4,7 @@ import type {
   Destination,
   Trip,
   TripCreatePayload,
+  WorkflowTraceResponse,
 } from './types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api';
@@ -42,8 +43,13 @@ export const api = {
   deleteTrip: (id: number) =>
     request<void>(`/trips/${id}`, { method: 'DELETE' }),
   listDestinations: () => request<Destination[]>('/destinations'),
-  chat: (messages: ChatMessage[]) =>
+  chat: (messages: ChatMessage[], sessionId?: string) =>
     request<ChatResponse>('/agent/chat', {
+      method: 'POST',
+      body: JSON.stringify({ messages, session_id: sessionId }),
+    }),
+  workflowTrace: (messages: ChatMessage[]) =>
+    request<WorkflowTraceResponse>('/agent/workflow/trace', {
       method: 'POST',
       body: JSON.stringify({ messages }),
     }),

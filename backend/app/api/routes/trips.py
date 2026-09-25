@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db import get_db
 from app.models import ItineraryItem, Trip
-from app.schemas import ItineraryItemCreate, TripCreate, TripRead, TripUpdate
+from app.schemas import TripCreate, TripRead, TripUpdate
 
 router = APIRouter(prefix="/trips", tags=["trips"])
 

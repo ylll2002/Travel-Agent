@@ -8,7 +8,6 @@ export function Layout() {
           TravelAgent
         </Link>
         <nav>
-          <Link to="/">目的地</Link>
           <Link to="/trips">我的行程</Link>
           <Link to="/agent">AI 助手</Link>
         </nav>

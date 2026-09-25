@@ -178,6 +178,233 @@ button:disabled {
   height: calc(100vh - 140px);
 }
 
+.agent-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.section-heading h1,
+.section-heading h2 {
+  margin: 4px 0 16px;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.plan-panel {
+  min-height: calc(100vh - 140px);
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.brief-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-left: 3px solid var(--primary);
+  background: #f4f7ff;
+}
+
+.brief-strip span,
+.section-label,
+.draft-card-topline,
+.draft-card p {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.plan-section {
+  margin-top: 24px;
+}
+
+.diagnostics-panel {
+  padding: 12px;
+  border: 1px solid #c7d2fe;
+  background: #f8faff;
+}
+
+.diagnostics-summary {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.diagnostics-panel details {
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.diagnostics-panel summary {
+  color: var(--primary);
+  cursor: pointer;
+}
+
+.workflow-timeline {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding-left: 20px;
+}
+
+.workflow-timeline li {
+  display: grid;
+  gap: 2px;
+}
+
+.workflow-timeline span,
+.workflow-timeline small {
+  color: var(--muted);
+}
+
+.diagnostics-error {
+  color: #b42318;
+}
+
+.section-label {
+  margin-bottom: 10px;
+  font-weight: 700;
+}
+
+.option-list,
+.draft-list {
+  display: grid;
+  gap: 10px;
+}
+
+.option-card {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  padding: 14px;
+  text-align: left;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.option-card span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.option-card:hover {
+  border-color: var(--primary);
+  background: #f4f7ff;
+}
+
+.draft-card {
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.draft-card-topline {
+  display: flex;
+  justify-content: space-between;
+}
+
+.draft-card h3 {
+  margin: 8px 0 4px;
+  font-size: 16px;
+}
+
+.draft-card p {
+  margin: 0 0 8px;
+}
+
+.card-status,
+.uncertain {
+  color: #9a6700;
+}
+
+.uncertain {
+  display: block;
+  margin-top: 10px;
+}
+
+.card-action {
+  margin-top: 12px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--primary);
+  font-size: 13px;
+}
+
+.card-action:hover {
+  border-color: var(--primary);
+  background: #f4f7ff;
+}
+
+.card-edit-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.card-edit-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.card-edit-form button {
+  padding: 8px 10px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.plan-empty {
+  margin-top: 28px;
+  line-height: 1.6;
+}
+
+.revision-card {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-left: 3px solid #d97706;
+  background: #fffbeb;
+  font-size: 13px;
+}
+
+.revision-card span {
+  color: var(--muted);
+}
+
+.revision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.primary-action {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: white;
+}
+
 .chat-log {
   flex: 1;
   overflow-y: auto;
@@ -213,5 +440,26 @@ button:disabled {
 
 .chat-form input {
   flex: 1;
+}
+
+@media (max-width: 760px) {
+  .agent-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-panel,
+  .plan-panel {
+    min-height: auto;
+    height: auto;
+  }
+
+  .chat-log {
+    min-height: 320px;
+    max-height: 52vh;
+  }
+
+  .card-edit-form {
+    flex-direction: column;
+  }
 }
 

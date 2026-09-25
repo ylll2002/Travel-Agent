@@ -17,14 +17,18 @@ export function useApi<T>(
   const [version, setVersion] = useState(0);
 
   const fetcherRef = useRef(fetcher);
-  fetcherRef.current = fetcher;
+  useEffect(() => {
+    fetcherRef.current = fetcher;
+  }, [fetcher]);
 
-  const refetch = useCallback(() => setVersion((v) => v + 1), []);
+  const refetch = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    setVersion((v) => v + 1);
+  }, []);
 
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    setError(null);
 
     fetcherRef
       .current()

@@ -21,6 +21,14 @@ class Settings(BaseSettings):
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     ]
+    
+    # LLM settings
+    openai_api_key: str = ""
+    openai_api_base: str = ""
+    openai_model: str = "gpt-4"
+    openai_temperature: float = 0.7
+    llm_timeout_seconds: float = 60.0
+    llm_max_tokens: int = 4000
 
 
 @lru_cache

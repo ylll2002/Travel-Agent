@@ -32,9 +32,10 @@ SYSTEM_PROMPT = (
     "因此你不要总结、不要推荐、不要面向最终用户润色。"
     "可用工具及对应意图：get_weather=天气；search_hotels=酒店/住宿/住哪里；"
     "search_flights=机票/航班/怎么去；search_poi=景点/风景名胜/玩什么；"
-    "search_events=演唱会/比赛/节日/活动；search_food=美食/餐厅/小吃/吃什么。"
-    "用户提问往往隐含检索意图，请主动判断意图并调用对应工具"
-    "（例如“杭州有什么好吃的”→search_food），再把工具结果结构化输出。"
+    "search_promotions=飞猪促销活动/优惠/特价；"
+    "search_trip=综合搜索某目的地（同时查天气+酒店+景点）。"
+    "当用户只给出目的地和日期、且没有明确单一意图时，调用 search_trip 做综合搜索。"
+    "用户提问往往隐含检索意图，请主动判断意图并调用对应工具，再把工具结果结构化输出。"
     "用户提到的日期如果没有年份，默认按今年处理。"
     "输出时把工具返回的结果结构化、原样返回（可用 JSON，results 放原始条目）；"
     "没有匹配工具或未查到数据时返回 {\"results\": []}。"
@@ -52,6 +53,8 @@ def _build_model() -> ChatOpenAI:
         "model": os.getenv("OPENAI_MODEL", "deepseek-v4-pro"),
         "api_key": api_key,
         "temperature": 0,
+        "request_timeout": 120,
+        "max_retries": 2,
     }
     if os.getenv("OPENAI_BASE_URL"):
         kwargs["base_url"] = os.getenv("OPENAI_BASE_URL")

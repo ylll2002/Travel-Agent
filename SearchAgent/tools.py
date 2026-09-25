@@ -1,15 +1,10 @@
-"""SearchAgent 的工具服务（MCP server）。
+"""SearchAgent 的工具服务（MCP server）与确定性搜索编排。
 
-通过 MCP 协议对外暴露六个工具：
-
-- ``get_weather``：查询某日期/日期段的逐日天气（Open-Meteo，无需 Key）
-- ``search_hotels``：搜索目的地酒店（飞猪 FlyAI）
-- ``search_flights``：搜索机票（飞猪 FlyAI）
-- ``search_poi``：搜索景点/风景名胜（飞猪 FlyAI）
-- ``search_events``：按地点和时间搜索热点活动（演唱会/比赛/节日等，DuckDuckGo 网络搜索）
-- ``search_food``：搜索美食/餐厅（大众点评/抖音/小红书等，DuckDuckGo 网络搜索）
-
-运行方式（stdio transport）：``python tools.py``
+结构：
+- 结构化核心函数 ``_fetch_*``：返回 dict / list[dict]，供 JSON 输出与编排使用
+- 文本格式化函数 ``_format_*``：把结构化数据转成可读文本
+- MCP 工具：把结构化数据格式化成文本，供 LLM agent 调用
+- ``run_search``：确定性综合编排，输入 JSON 输出 JSON（不经过 LLM）
 """
 
 import json
@@ -19,11 +14,12 @@ import subprocess
 import time
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import certifi
-from ddgs import DDGS
 from mcp.server.fastmcp import FastMCP
 
 server = FastMCP(
@@ -34,9 +30,9 @@ server = FastMCP(
 
 FLYAI_BIN = Path(__file__).resolve().parent / "node_modules" / ".bin" / "flyai"
 
-
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 
 WEATHER_CODES = {
     0: "晴朗",
@@ -80,64 +76,24 @@ def _run_flyai(args: list[str]) -> dict:
 
 
 def _normalize_date(value: str) -> str:
-    """把 LLM 可能传的各种日期格式统一成 YYYY-MM-DD。"""
+    """把各种日期格式统一成 YYYY-MM-DD。"""
     value = value.strip()
-    # 2026-10-1 / 2026-10-01
     m = re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", value)
     if m:
         return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
-    # 2026/10/1 或 2026.10.1
     m = re.fullmatch(r"(\d{4})[/.](\d{1,2})[/.](\d{1,2})", value)
     if m:
         return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
-    # 2026年10月1日 / 2026年10月1号
     m = re.fullmatch(r"(\d{4})年(\d{1,2})月(\d{1,2})[日号]?", value)
     if m:
         return f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
-    # 10-1 / 10/1 / 10.1（补当前年份）
     m = re.fullmatch(r"(\d{1,2})[-/.](\d{1,2})", value)
     if m:
         return f"{date.today().year:04d}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
-    # 10月1日 / 10月1号（补当前年份）
     m = re.fullmatch(r"(\d{1,2})月(\d{1,2})[日号]?", value)
     if m:
         return f"{date.today().year:04d}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
     return value
-
-
-def _web_search(queries: list[str], max_per_query: int = 15) -> list[dict]:
-    """对多组查询词做网络搜索并去重，返回最多 50 条结果（带重试退避，应对限流）。"""
-    items: list[dict] = []
-    seen: set[str] = set()
-    with DDGS() as ddgs:
-        for query in queries:
-            results: list[dict] = []
-            for attempt in range(3):
-                try:
-                    results = list(
-                        ddgs.text(query, max_results=max_per_query, region="cn-zh")
-                    )
-                    if results or attempt == 2:
-                        break
-                except Exception:
-                    pass
-                time.sleep(2 * (attempt + 1))
-            for result in results:
-                url = (result.get("href") or result.get("url") or "").strip()
-                if not url or url in seen:
-                    continue
-                seen.add(url)
-                items.append(
-                    {
-                        "title": (result.get("title") or "").strip(),
-                        "snippet": (result.get("body") or "").strip(),
-                        "url": url,
-                    }
-                )
-                if len(items) >= 50:
-                    return items
-            time.sleep(1)
-    return items
 
 
 def _geocode_city(city: str) -> tuple[str, str, str, str]:
@@ -158,34 +114,19 @@ def _geocode_city(city: str) -> tuple[str, str, str, str]:
     )
 
 
-@server.tool(
-    description=(
-        "查询某城市在指定日期（或日期段）内的逐日天气。"
-        "city 为城市名（支持中英文，必填）；start_date 为开始日期（YYYY-MM-DD，可选，缺省今天）；"
-        "end_date 为结束日期（可选，缺省等于 start_date）。"
-        "返回每天的天气状况、最高/最低气温和湿度。"
-    )
-)
-def get_weather(
-    city: str,
-    start_date: str | None = None,
-    end_date: str | None = None,
-) -> str:
-    """返回某城市某日期段的逐日天气。"""
-    latitude, longitude, name, country = _geocode_city(city)
+# ================= 结构化核心（返回 dict / list[dict]） =================
 
+
+def _fetch_weather(city: str, start_date: str | None = None, end_date: str | None = None) -> dict:
+    latitude, longitude, name, country = _geocode_city(city)
     today = date.today()
     try:
         start = date.fromisoformat(_normalize_date(start_date)) if start_date else today
         end = date.fromisoformat(_normalize_date(end_date)) if end_date else start
-    except ValueError:
-        return f"日期无法识别（{start_date or end_date}），请用 YYYY-MM-DD 格式。"
+    except ValueError as exc:
+        raise ValueError(f"日期无法识别：{start_date or end_date}") from exc
 
-    base_url = (
-        "https://archive-api.open-meteo.com/v1/archive"
-        if end < today
-        else FORECAST_URL
-    )
+    base_url = ARCHIVE_URL if end < today else FORECAST_URL
     params = {
         "latitude": latitude,
         "longitude": longitude,
@@ -197,34 +138,29 @@ def get_weather(
     data = _http_get_json(f"{base_url}?{urllib.parse.urlencode(params)}")
     daily = data.get("daily") or {}
     times = daily.get("time") or []
-    if not times:
-        return f"{name}（{country}）该日期暂无天气数据。"
-
-    if start == end:
-        title = f"{name}（{country}）{start.isoformat()} 天气："
-    else:
-        title = f"{name}（{country}）{start.isoformat()} 至 {end.isoformat()} 逐日天气："
-
-    lines = [title]
+    days = []
     for i, day in enumerate(times):
         code = daily.get("weather_code", [])[i]
-        description = WEATHER_CODES.get(code, f"代码{code}")
-        tmax = daily.get("temperature_2m_max", [])[i]
-        tmin = daily.get("temperature_2m_min", [])[i]
-        humidity = daily.get("relative_humidity_2m_mean", [])[i]
-        lines.append(f"  {day}：{description}，{tmin}~{tmax}°C，湿度 {humidity}%")
-    return "\n".join(lines)
+        days.append(
+            {
+                "date": day,
+                "weather": WEATHER_CODES.get(code, f"代码{code}"),
+                "weather_code": code,
+                "temp_min": daily.get("temperature_2m_min", [])[i],
+                "temp_max": daily.get("temperature_2m_max", [])[i],
+                "humidity": daily.get("relative_humidity_2m_mean", [])[i],
+            }
+        )
+    return {
+        "location": name,
+        "country": country,
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "days": days,
+    }
 
 
-@server.tool(
-    description=(
-        "搜索指定目的地的酒店。destination 为目的地（城市/省/国家/区，必填）；"
-        "可选入住日期 check_in_date、离店日期 check_out_date（格式 YYYY-MM-DD）、"
-        "最高每晚价格 max_price、星级 hotel_stars（逗号分隔，如 4,5）、"
-        "酒店类型 hotel_types（酒店/民宿/客栈）、排序 sort。返回酒店名称、价格、星级、位置与预订链接。"
-    )
-)
-def search_hotels(
+def _fetch_hotels(
     destination: str,
     check_in_date: str | None = None,
     check_out_date: str | None = None,
@@ -232,8 +168,7 @@ def search_hotels(
     hotel_stars: str | None = None,
     hotel_types: str | None = None,
     sort: str | None = None,
-) -> str:
-    """搜索目的地酒店并返回简要结果。"""
+) -> list[dict]:
     args = ["search-hotel", "--dest-name", destination]
     if check_in_date:
         args += ["--check-in-date", _normalize_date(check_in_date)]
@@ -250,38 +185,22 @@ def search_hotels(
 
     data = _run_flyai(args)
     if data.get("status") not in (0, None):
-        return f"查询出错：{data.get('message') or '未知错误'}"
+        raise ValueError(data.get("message") or "查询出错")
     items = (data.get("data") or {}).get("itemList") or []
-    if not items:
-        return f"没有找到「{destination}」的酒店，换个目的地或放宽条件试试。"
-
-    lines = [f"{destination} 酒店（前 {min(len(items), 5)} 家）："]
-    for item in items[:5]:
-        parts = [item.get("name") or "未知酒店"]
-        if item.get("star"):
-            parts.append(str(item["star"]))
-        if item.get("scoreDesc") or item.get("score"):
-            parts.append(str(item.get("scoreDesc") or item.get("score")))
-        if item.get("price"):
-            parts.append(str(item["price"]))
-        poi = item.get("interestsPoi") or item.get("address") or ""
-        if poi:
-            parts.append(poi)
-        lines.append(" - " + " | ".join(parts))
-        if item.get("detailUrl"):
-            lines.append(f"   预订: {item['detailUrl']}")
-    return "\n".join(lines)
+    return [
+        {
+            "name": item.get("name") or "",
+            "star": item.get("star") or "",
+            "score": item.get("scoreDesc") or item.get("score") or "",
+            "price": item.get("price") or "",
+            "location": item.get("interestsPoi") or item.get("address") or "",
+            "url": item.get("detailUrl") or "",
+        }
+        for item in items
+    ]
 
 
-@server.tool(
-    description=(
-        "搜索机票。origin 为出发城市/机场（必填），destination 为目的地城市/机场；"
-        "可选出发日期 dep_date、返程日期 back_date（格式 YYYY-MM-DD）、"
-        "journey_type 直飞/中转（1=直飞，2=中转）、sort_type 排序、max_price 最高价格。"
-        "返回航班、时刻、舱位、价格与预订链接。"
-    )
-)
-def search_flights(
+def _fetch_flights(
     origin: str,
     destination: str | None = None,
     dep_date: str | None = None,
@@ -289,8 +208,7 @@ def search_flights(
     journey_type: str | None = None,
     sort_type: str | None = None,
     max_price: float | None = None,
-) -> str:
-    """搜索机票并返回简要结果。"""
+) -> list[dict]:
     args = ["search-flight", "--origin", origin]
     if destination:
         args += ["--destination", destination]
@@ -307,97 +225,35 @@ def search_flights(
 
     data = _run_flyai(args)
     if data.get("status") not in (0, None):
-        return f"查询出错：{data.get('message') or '未知错误'}"
+        raise ValueError(data.get("message") or "查询出错")
     items = (data.get("data") or {}).get("itemList") or []
-    label = f"{origin} → {destination or '目的地'}"
-    if not items:
-        return f"没有找到 {label} 的机票。"
-
-    lines = [f"{label} 机票（前 {min(len(items), 5)} 班）："]
-    for item in items[:5]:
+    result = []
+    for item in items:
         journeys = item.get("journeys") or []
         segment = (journeys[0].get("segments") or [{}])[0] if journeys else {}
-        airline = segment.get("marketingTransportName") or ""
-        flight_no = segment.get("marketingTransportNo") or ""
-        dep_station = segment.get("depStationName") or ""
-        arr_station = segment.get("arrStationName") or ""
-        dep_time = segment.get("depDateTime") or ""
-        arr_time = segment.get("arrDateTime") or ""
-        seat = segment.get("seatClassName") or ""
-
-        core = f"{airline}{flight_no} | {dep_station}→{arr_station} | {dep_time} → {arr_time}"
-        parts = [core]
-        if seat:
-            parts.append(seat)
-        if item.get("totalDuration"):
-            parts.append(f"{item['totalDuration']}分钟")
-        price = item.get("ticketPrice") or item.get("adultPrice") or ""
-        if price:
-            parts.append(f"¥{price}")
-        lines.append(" - " + " | ".join(parts))
-        if item.get("jumpUrl"):
-            lines.append(f"   预订: {item['jumpUrl']}")
-    return "\n".join(lines)
+        result.append(
+            {
+                "airline": segment.get("marketingTransportName") or "",
+                "flight_no": segment.get("marketingTransportNo") or "",
+                "dep_station": segment.get("depStationName") or "",
+                "arr_station": segment.get("arrStationName") or "",
+                "dep_time": segment.get("depDateTime") or "",
+                "arr_time": segment.get("arrDateTime") or "",
+                "seat": segment.get("seatClassName") or "",
+                "duration": item.get("totalDuration") or "",
+                "price": item.get("ticketPrice") or item.get("adultPrice") or "",
+                "url": item.get("jumpUrl") or "",
+            }
+        )
+    return result
 
 
-@server.tool(
-    description=(
-        "按地点和时间搜索该时间段内的热点活动（演唱会、音乐节、体育比赛、节日庆典、展览演出等）。"
-        "location 为地点（城市名，必填）；start_date 为开始日期（YYYY-MM-DD，必填）；"
-        "end_date 为结束日期（可选，缺省等于 start_date）；keywords 可选，用于指定活动类型（逗号分隔）。"
-        "返回去重后的活动列表（最多 50 条），含标题、摘要和链接。"
-    )
-)
-def search_events(
-    location: str,
-    start_date: str,
-    end_date: str | None = None,
-    keywords: str | None = None,
-) -> str:
-    """搜索某地点在某时间段内的热点活动。"""
-    start = _normalize_date(start_date)
-    end = _normalize_date(end_date) if end_date else start
-
-    sy, sm, _ = (int(x) for x in start.split("-"))
-    ey, em, _ = (int(x) for x in end.split("-"))
-    if (sy, sm) == (ey, em):
-        period = f"{sy}年{sm}月"
-    else:
-        period = f"{sy}年{sm}月至{ey}年{em}月"
-
-    cats = [c.strip() for c in (keywords or "").split(",") if c.strip()]
-    if not cats:
-        cats = ["演唱会 音乐节", "体育比赛 赛事", "节日 庆典 活动", "展览 演出"]
-    queries = [f"{location} {period} {cat}" for cat in cats]
-
-    items = _web_search(queries)
-    if not items:
-        return f"没有搜到「{location}」在 {period} 的热点活动，换个地点或日期试试。"
-
-    lines = [f"{location} {period} 热点活动（共 {len(items)} 条）："]
-    for i, item in enumerate(items, 1):
-        lines.append(f"{i}. {item['title']}")
-        if item["snippet"]:
-            lines.append(f"   {item['snippet'][:100]}")
-        lines.append(f"   {item['url']}")
-    return "\n".join(lines)
-
-
-@server.tool(
-    description=(
-        "搜索某城市的景点/风景名胜。city_name 为城市名（必填）；"
-        "keyword 为景点名称关键词（可选，如 西湖、故宫）；"
-        "category 为景点类别（可选，如 自然风光、人文古迹、历史古迹、山湖田园、古镇古村、宗教场所、博物馆 等）；"
-        "poi_level 为景点等级 1-5（可选）。返回景点名称、类别、排名、地址、简介和预订链接。"
-    )
-)
-def search_poi(
+def _fetch_poi(
     city_name: str,
     keyword: str | None = None,
     category: str | None = None,
     poi_level: str | None = None,
-) -> str:
-    """搜索某城市的景点/风景名胜。"""
+) -> list[dict]:
     args = ["search-poi", "--city-name", city_name]
     if keyword:
         args += ["--keyword", keyword]
@@ -408,64 +264,237 @@ def search_poi(
 
     data = _run_flyai(args)
     if data.get("status") not in (0, None):
-        return f"查询出错：{data.get('message') or '未知错误'}"
+        raise ValueError(data.get("message") or "查询出错")
     items = (data.get("data") or {}).get("itemList") or []
-    if not items:
-        return f"没有找到「{city_name}」的景点，换个关键词或类别试试。"
+    return [
+        {
+            "name": item.get("name") or "",
+            "category": item.get("category") or "",
+            "rank": item.get("listRank") or "",
+            "free": item.get("freePoiStatus") == "FREE",
+            "description": item.get("description") or "",
+            "url": item.get("jumpUrl") or "",
+        }
+        for item in items
+    ]
 
+
+def _fetch_promotions(keyword: str | None = None) -> list[dict]:
+    """检索飞猪促销活动/优惠商品（特价机票卡、券包、酒店套餐等）。"""
+    query = (keyword or "").strip() or "促销活动 特价 优惠"
+    data = _run_flyai(["keyword-search", "--query", query])
+    if data.get("status") not in (0, None):
+        raise ValueError(data.get("message") or "查询出错")
+    items = (data.get("data") or {}).get("itemList") or []
+    result = []
+    for item in items:
+        info = item.get("info") or {}
+        result.append(
+            {
+                "title": info.get("title") or "",
+                "price": info.get("price") or "",
+                "star": info.get("star") or "",
+                "tags": info.get("tags") or "",
+                "image": info.get("picUrl") or "",
+                "url": info.get("jumpUrl") or "",
+            }
+        )
+    return result
+
+
+# ================= 文本格式化（MCP 工具用） =================
+
+
+def _format_weather(d: dict) -> str:
+    lines = [f"{d['location']}（{d['country']}）{d['start_date']} 至 {d['end_date']} 逐日天气："]
+    for day in d["days"]:
+        lines.append(
+            f"  {day['date']}：{day['weather']}，{day['temp_min']}~{day['temp_max']}°C，湿度 {day['humidity']}%"
+        )
+    return "\n".join(lines) if d["days"] else f"{d['location']} 该日期暂无天气数据。"
+
+
+def _format_hotels(items: list[dict], destination: str) -> str:
+    if not items:
+        return f"没有找到「{destination}」的酒店。"
+    lines = [f"{destination} 酒店（前 {min(len(items), 5)} 家）："]
+    for item in items[:5]:
+        parts = [item["name"]]
+        for key in ("star", "score", "price", "location"):
+            if item.get(key):
+                parts.append(str(item[key]))
+        lines.append(" - " + " | ".join(parts))
+        if item.get("url"):
+            lines.append(f"   预订: {item['url']}")
+    return "\n".join(lines)
+
+
+def _format_flights(items: list[dict], origin: str, destination: str | None) -> str:
+    label = f"{origin} → {destination or '目的地'}"
+    if not items:
+        return f"没有找到 {label} 的机票。"
+    lines = [f"{label} 机票（前 {min(len(items), 5)} 班）："]
+    for item in items[:5]:
+        core = f"{item['airline']}{item['flight_no']} | {item['dep_station']}→{item['arr_station']} | {item['dep_time']} → {item['arr_time']}"
+        parts = [core]
+        if item.get("seat"):
+            parts.append(item["seat"])
+        if item.get("duration"):
+            parts.append(f"{item['duration']}分钟")
+        if item.get("price"):
+            parts.append(f"¥{item['price']}")
+        lines.append(" - " + " | ".join(parts))
+        if item.get("url"):
+            lines.append(f"   预订: {item['url']}")
+    return "\n".join(lines)
+
+
+def _format_poi(items: list[dict], city_name: str) -> str:
+    if not items:
+        return f"没有找到「{city_name}」的景点。"
     lines = [f"{city_name} 景点（前 {min(len(items), 10)} 个）："]
     for item in items[:10]:
-        parts = [item.get("name") or "未知景点"]
+        parts = [item["name"]]
         if item.get("category"):
-            parts.append(str(item["category"]))
-        if item.get("listRank"):
-            parts.append(str(item["listRank"]))
-        if item.get("freePoiStatus") == "FREE":
+            parts.append(item["category"])
+        if item.get("rank"):
+            parts.append(item["rank"])
+        if item.get("free"):
             parts.append("免费")
         lines.append(" - " + " | ".join(parts))
         if item.get("description"):
             lines.append(f"   {item['description'][:100]}")
-        if item.get("jumpUrl"):
-            lines.append(f"   预订: {item['jumpUrl']}")
+        if item.get("url"):
+            lines.append(f"   预订: {item['url']}")
     return "\n".join(lines)
+
+
+def _format_promotions(items: list[dict], keyword: str) -> str:
+    if not items:
+        return f"没有找到「{keyword}」相关的促销活动。"
+    lines = [f"飞猪促销活动（前 {min(len(items), 10)} 个）："]
+    for item in items[:10]:
+        parts = [item["title"]]
+        if item.get("price"):
+            parts.append(str(item["price"]))
+        if item.get("star"):
+            parts.append(str(item["star"]))
+        lines.append(" - " + " | ".join(parts))
+        if item.get("url"):
+            lines.append(f"   预订: {item['url']}")
+    return "\n".join(lines)
+
+
+# ================= MCP 工具（返回文本） =================
 
 
 @server.tool(
-    description=(
-        "搜索某地的美食/餐厅，重点在大众点评、抖音、小红书等社交平台上检索。"
-        "location 为地点（城市/区域，必填）；keywords 为菜系或类型（可选，如 杭帮菜、火锅、小吃）。"
-        "返回去重后的美食相关条目（最多 50 条），含标题、摘要和链接。"
-    )
+    description="查询某城市在指定日期（段）内的逐日天气。city 必填，start_date/end_date 可选（YYYY-MM-DD）。"
 )
-def search_food(
-    location: str,
-    keywords: str | None = None,
-) -> str:
-    """搜索某地的美食/餐厅。"""
-    food = (keywords or "").strip() or "美食"
-    queries = [
-        f"site:dianping.com {location} {food}",
-        f"site:xiaohongshu.com {location} {food}",
-        f"site:douyin.com {location} {food}",
-        f"{location} {food} 大众点评 必吃榜",
-        f"{location} {food} 小红书 探店",
-        f"{location} {food} 抖音 探店",
-    ]
-    items = _web_search(queries)
-    if not items:
-        return f"没有搜到「{location}」的{food}相关内容，换个地点或关键词试试。"
+def get_weather(city: str, start_date: str | None = None, end_date: str | None = None) -> str:
+    return _format_weather(_fetch_weather(city, start_date, end_date))
 
-    lines = [f"{location} {food} 相关推荐（共 {len(items)} 条）："]
-    for i, item in enumerate(items, 1):
-        lines.append(f"{i}. {item['title']}")
-        if item["snippet"]:
-            lines.append(f"   {item['snippet'][:100]}")
-        lines.append(f"   {item['url']}")
-    return "\n".join(lines)
+
+@server.tool(description="搜索目的地酒店。destination 必填，其余可选。")
+def search_hotels(
+    destination: str,
+    check_in_date: str | None = None,
+    check_out_date: str | None = None,
+    max_price: float | None = None,
+    hotel_stars: str | None = None,
+    hotel_types: str | None = None,
+    sort: str | None = None,
+) -> str:
+    return _format_hotels(
+        _fetch_hotels(destination, check_in_date, check_out_date, max_price, hotel_stars, hotel_types, sort),
+        destination,
+    )
+
+
+@server.tool(description="搜索机票。origin 必填，其余可选。")
+def search_flights(
+    origin: str,
+    destination: str | None = None,
+    dep_date: str | None = None,
+    back_date: str | None = None,
+    journey_type: str | None = None,
+    sort_type: str | None = None,
+    max_price: float | None = None,
+) -> str:
+    return _format_flights(
+        _fetch_flights(origin, destination, dep_date, back_date, journey_type, sort_type, max_price),
+        origin,
+        destination,
+    )
+
+
+@server.tool(description="搜索景点/风景名胜。city_name 必填，其余可选。")
+def search_poi(
+    city_name: str,
+    keyword: str | None = None,
+    category: str | None = None,
+    poi_level: str | None = None,
+) -> str:
+    return _format_poi(_fetch_poi(city_name, keyword, category, poi_level), city_name)
+
+
+@server.tool(description="检索飞猪促销活动/优惠商品（特价机票卡、券包、酒店套餐等）。keyword 可选。")
+def search_promotions(keyword: str | None = None) -> str:
+    return _format_promotions(_fetch_promotions(keyword), keyword or "促销活动")
+
+
+# ================= 确定性综合编排（JSON in / JSON out） =================
+
+
+def _run_safe(key: str, fn: Any) -> tuple[str, Any]:
+    try:
+        return key, fn()
+    except Exception as exc:  # noqa: BLE001
+        return key, {"error": str(exc)}
+
+
+def run_search(input_data: dict) -> dict:
+    """输入 {destination, start_date, end_date?}，并行调用 4 个工具，返回结构化 JSON。"""
+    destination = (input_data.get("destination") or "").strip()
+    if not destination:
+        raise ValueError("缺少 destination")
+    start_date = input_data.get("start_date")
+    if not start_date:
+        raise ValueError("缺少 start_date")
+    start = _normalize_date(start_date)
+    end = _normalize_date(input_data["end_date"]) if input_data.get("end_date") else start
+
+    result: dict[str, Any] = {
+        "destination": destination,
+        "start_date": start,
+        "end_date": end,
+    }
+
+    tasks = {
+        "weather": lambda: _fetch_weather(destination, start, end),
+        "hotels": lambda: _fetch_hotels(destination, start, end),
+        "poi": lambda: _fetch_poi(destination),
+        "promotions": lambda: _fetch_promotions(f"{destination} 促销 特价"),
+    }
+    with ThreadPoolExecutor(max_workers=len(tasks)) as executor:
+        futures = {key: executor.submit(_run_safe, key, fn) for key, fn in tasks.items()}
+        for key, future in futures.items():
+            result_key, value = future.result()
+            result[result_key] = value
+
+    return result
+
+
+@server.tool(description="综合搜索某目的地（天气+酒店+景点+促销），返回结构化 JSON。")
+def search_trip(destination: str, start_date: str, end_date: str | None = None) -> str:
+    return json.dumps(
+        run_search({"destination": destination, "start_date": start_date, "end_date": end_date}),
+        ensure_ascii=False,
+    )
 
 
 def main() -> None:
-    server.run()  # 默认使用 stdio transport
+    server.run()
 
 
 if __name__ == "__main__":

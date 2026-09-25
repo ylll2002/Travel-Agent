@@ -1,13 +1,12 @@
 # SearchAgent - 数据检索 agent 模块
 
-一个「LangGraph agent + MCP 工具」示例，内置六个工具：
+一个「LangGraph agent + MCP 工具」示例，内置五个工具：
 
 - `get_weather`：查询某日期/日期段的逐日天气（Open-Meteo，无需 key）
 - `search_hotels`：搜索目的地酒店（飞猪 FlyAI）
 - `search_flights`：搜索机票（飞猪 FlyAI）
 - `search_poi`：搜索景点/风景名胜（飞猪 FlyAI）
-- `search_events`：按地点和时间搜索热点活动（演唱会/比赛/节日，DuckDuckGo 网络搜索）
-- `search_food`：搜索美食/餐厅（大众点评/抖音/小红书，DuckDuckGo 网络搜索）
+- `search_promotions`：检索飞猪促销活动/优惠商品（飞猪 FlyAI）
 
 文件说明：
 
@@ -52,21 +51,18 @@ python agent.py "东京现在天气怎么样？"
 不带参数则进入交互模式（多轮对话，带记忆）。agent 会启动 `tools.py` 作为 MCP 子进程，
 由 LangGraph 的 ReAct 循环决定调用合适的工具并返回检索结果。
 
-## 已知限制与建议
+## JSON / 自然语言统一入口
 
-`search_events` 和 `search_food` 底层用的是免费的 DuckDuckGo 网络搜索（`ddgs`），
-无需 API Key，但有两点局限：
+```bash
+# JSON 输入
+echo '{"destination":"宁波","start_date":"2026-10-01","end_date":"2026-10-03"}' | python search.py
 
-- 高频调用时会被限流，可能间歇性返回空结果或结果偏少（`tools.py` 里已加「重试 + 指数退避」缓解）。
-- 结果偏中文 SEO 站点，覆盖和权威性一般，且不一定能稳定凑满 50 条。
+# 自然语言输入（会先用 DeepSeek 解析成 JSON）
+python search.py "宁波 10月1日到10月5日"
+```
 
-如果追求稳定和更好的结果质量，建议换成付费搜索 API（三者选一即可）：
-
-- Tavily：对 AI agent 最友好，支持日期范围过滤
-- Serper：Google 搜索结果
-- Bing Search：微软官方 API
-
-接入后只需把 `tools.py` 里的 `_web_search` 替换成对应 API 的调用，工具签名和 agent 侧无需改动。
+`search.py` 统一入口：输入是 JSON 则直接调用 `run_search`，是自然语言则先解析成 JSON；
+输出为结构化 JSON，包含 `weather`、`hotels`、`poi`、`promotions` 四个字段（并行调用）。
 
 ## 单独测试工具服务
 

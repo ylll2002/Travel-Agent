@@ -12,12 +12,14 @@
 输出：旅行计划 JSON（含逐日 itinerary）
 """
 
+import hashlib
 import json
 import math
 import os
 import re
 import subprocess
 import sys
+from collections import OrderedDict
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
@@ -384,19 +386,150 @@ def _user_match_signals(profile, preferences, basic) -> tuple[list[str], list[st
     return _dedupe_keywords(positive), _dedupe_keywords(negative)
 
 
-def _score_poi_match(poi: dict, profile, preferences, basic) -> int:
-    """给单个景点打分（0-100），反映其与画像/偏好/本次旅行信息的匹配度。"""
-    positive, negative = _user_match_signals(profile, preferences, basic)
-    if not positive and not negative:
-        return 50
-    text = " ".join(
+def _poi_match_text(poi: dict) -> str:
+    """景点用于匹配/embedding 的文本。"""
+    return " ".join(
         str(poi.get(key) or "")
         for key in ("name", "category", "description", "scale", "duration", "district")
     )
+
+
+def _user_match_text(profile, preferences, basic) -> str:
+    """用户画像/偏好/本次需求拼成的文本，用于 embedding。"""
+    parts: list[str] = []
+    for source in (
+        (profile or {}).get("travel_style"),
+        (basic or {}).get("travel_style"),
+        (basic or {}).get("purposes"),
+    ):
+        items = source or []
+        if isinstance(items, str):
+            items = [items]
+        parts.extend(str(x).strip() for x in items if str(x).strip())
+    liked = (preferences or {}).get("liked") or []
+    if isinstance(liked, str):
+        liked = [liked]
+    parts.extend(str(x).strip() for x in liked if str(x).strip())
+    return " ".join(parts)
+
+
+_embedding_client = None
+
+
+def _embedding_client_instance():
+    """懒加载 embedding 客户端；未配置时返回 None。"""
+    global _embedding_client
+    if _embedding_client is None:
+        base_url = os.getenv("EMBEDDING_BASE_URL") or ""
+        api_key = os.getenv("EMBEDDING_API_KEY") or os.getenv("OPENAI_API_KEY") or ""
+        if not base_url or not api_key:
+            return None
+        _embedding_client = OpenAI(api_key=api_key, base_url=base_url)
+    return _embedding_client
+
+
+def _embed_texts(client, texts: list[str]) -> list[list[float]] | None:
+    """批量把文本转成向量；失败返回 None。"""
+    if not texts:
+        return []
+    model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+    try:
+        resp = client.embeddings.create(model=model, input=texts)
+        return [item.embedding for item in resp.data]
+    except Exception:
+        return None
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def _score_poi_match(poi: dict, profile, preferences, basic) -> int:
+    """给单个景点打关键词匹配分（0-100），反映其与画像/偏好/本次旅行信息的匹配度。"""
+    positive, negative = _user_match_signals(profile, preferences, basic)
+    if not positive and not negative:
+        return 50
+    text = _poi_match_text(poi)
     pos_hits = sum(1 for kw in positive if kw in text)
     neg_hits = sum(1 for kw in negative if kw in text)
     score = 50 + 12 * pos_hits - 18 * neg_hits
     return max(0, min(100, score))
+
+
+EMBEDDING_CACHE_PATH = BASE_DIR / "poi_embedding_cache.json"
+EMBEDDING_CACHE_MAX = 2000  # 缓存向量条数上限，超出按 LRU 淘汰最旧的
+
+
+def _load_embedding_cache() -> OrderedDict:
+    try:
+        data = json.loads(EMBEDDING_CACHE_PATH.read_text(encoding="utf-8"))
+        return OrderedDict(data) if isinstance(data, dict) else OrderedDict()
+    except (OSError, json.JSONDecodeError):
+        return OrderedDict()
+
+
+def _save_embedding_cache(cache: OrderedDict) -> None:
+    # 容量上限：超出则从最旧（最久未用）开始淘汰
+    while len(cache) > EMBEDDING_CACHE_MAX:
+        cache.popitem(last=False)
+    try:
+        EMBEDDING_CACHE_PATH.write_text(
+            json.dumps(dict(cache), ensure_ascii=False), encoding="utf-8"
+        )
+    except OSError:
+        pass
+
+
+def _embedding_cache_key(poi: dict, model: str) -> str:
+    """键 = 模型名 + 文本 hash，模型切换或文本变化都会产生新键。"""
+    text = _poi_match_text(poi)
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    return f"{model}::{digest}"
+
+
+def _apply_match_scores(pois: list[dict], profile, preferences, basic) -> None:
+    """给每个景点算匹配度：关键词分 + 可选的向量相似度分（0.4 关键词 + 0.6 向量）。"""
+    for poi in pois:
+        poi["match_score"] = _score_poi_match(poi, profile, preferences, basic)
+    client = _embedding_client_instance()
+    if client is None:
+        return
+    user_text = _user_match_text(profile, preferences, basic)
+    if not user_text.strip():
+        return
+    model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+    cache = _load_embedding_cache()
+    poi_vecs: list[list[float] | None] = [None] * len(pois)
+    to_embed: list[tuple[int, str, str]] = []
+    for index, poi in enumerate(pois):
+        key = _embedding_cache_key(poi, model)
+        if key in cache and isinstance(cache[key], list):
+            poi_vecs[index] = cache[key]
+            cache.move_to_end(key)  # 标记最近使用
+        else:
+            to_embed.append((index, key, _poi_match_text(poi)))
+    texts = [user_text] + [text for _, _, text in to_embed]
+    vectors = _embed_texts(client, texts)
+    if not vectors or len(vectors) != len(texts):
+        return
+    user_vec = vectors[0]
+    for offset, (index, key, _) in enumerate(to_embed):
+        vector = vectors[offset + 1]
+        poi_vecs[index] = vector
+        cache[key] = vector  # 新条目放到末尾（最近使用）
+    if to_embed:
+        _save_embedding_cache(cache)
+    for index, poi in enumerate(pois):
+        vector = poi_vecs[index]
+        if vector is None:
+            continue
+        similarity = _cosine(user_vec, vector)
+        vec_score = (similarity + 1) / 2 * 100
+        keyword_score = int(poi.get("match_score") or 0)
+        poi["match_score"] = round(0.4 * keyword_score + 0.6 * vec_score)
 
 
 def _filter_far_pois(search: dict, destination: str, max_km: float = 60.0) -> dict:
@@ -1135,6 +1268,8 @@ def _enforce_day_schedule(day_plan: dict, assignment: dict, date_: str,
             previous_coord = coord
         if poi.get("match_score") is not None:
             item["match_score"] = int(poi["match_score"])
+        if poi.get("category_label"):
+            item["category_label"] = poi["category_label"]
         item["link"] = poi.get("url") or item.get("link") or ""
         schedule.append(item)
         cursor = proposed_start + duration
@@ -2391,9 +2526,12 @@ def build_plan(
     transport = _select_transport(search_result, basic)
 
     # 为每个景点按画像/偏好/本次旅行信息计算匹配度，供模型和最终输出使用。
-    for poi in (search_result.get("poi") or []):
-        if isinstance(poi, dict):
-            poi["match_score"] = _score_poi_match(poi, profile, preferences, basic)
+    _apply_match_scores(
+        [p for p in (search_result.get("poi") or []) if isinstance(p, dict)],
+        profile,
+        preferences,
+        basic,
+    )
 
     search_result = _filter_far_pois(search_result, destination)
 
@@ -2501,6 +2639,13 @@ def build_plan(
     result = meta
     result["selected_transport"] = transport
     warnings = []
+    # 天气数据异常（常见于查询日期过远，超出预报范围）
+    weather = search_result.get("weather")
+    if isinstance(weather, dict) and weather.get("error"):
+        warnings.append("天气数据暂不可用（可能查询日期过远，超出预报范围）。")
+    # 酒店为空（常见于日期过远或数据源暂无库存）
+    if not search_result.get("hotels"):
+        warnings.append("未找到可预订酒店（可能日期过远或数据源暂无数据），酒店安排待确认。")
     origin = (basic or {}).get("origin") or search_result.get("origin")
     if origin and origin != destination:
         for key, label, target_day in (("outbound", "去程", 1), ("inbound", "返程", days)):

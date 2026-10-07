@@ -110,6 +110,22 @@ type RoutePlan = {
   summaries: Record<string, string>;
   blocks: RouteBlock[];
   legs: RouteLeg[];
+  suggestions?: PlanSuggestions;
+};
+
+type SuggestionCard = {
+  name: string;
+  image: string;
+  subtitle: string;
+  link: string;
+};
+
+type PlanSuggestions = {
+  cover_image: string;
+  spots_rank: SuggestionCard[];
+  spots_match: SuggestionCard[];
+  restaurants: SuggestionCard[];
+  hotels: SuggestionCard[];
 };
 
 function getPlanDayCount(plan: RoutePlan): number {
@@ -560,6 +576,7 @@ export function AgentPage() {
           unpriced_items?: Record<string, string[]>;
           food_warnings?: string[];
           warnings?: string[];
+          suggestions?: PlanSuggestions;
           error?: string;
         };
         if (plan.error) {
@@ -587,6 +604,7 @@ export function AgentPage() {
           cost_by_style: plan.cost_by_style,
           budget_by_style: plan.budget_by_style,
           unpriced_items: plan.unpriced_items,
+          suggestions: plan.suggestions,
         });
         setActiveStyle(styles[0] ?? '');
         setActiveDay('all');
@@ -1517,6 +1535,44 @@ export function AgentPage() {
             ))}
           </div>
 
+          {routePlan?.suggestions && (
+            <div className="ta-suggestion-panel">
+              {[
+                { title: '排行榜推荐景点', cards: routePlan.suggestions.spots_rank },
+                { title: '高匹配景点', cards: routePlan.suggestions.spots_match },
+                { title: '高分餐厅', cards: routePlan.suggestions.restaurants },
+                { title: '预算内酒店', cards: routePlan.suggestions.hotels },
+              ].filter((group) => group.cards.length > 0).map((group) => (
+                <div key={group.title} className="ta-suggestion-group">
+                  <div className="ta-suggestion-group-title">{group.title}</div>
+                  <div className="ta-suggestion-scroll">
+                    {group.cards.map((card) => (
+                      <a
+                        key={card.name}
+                        className="ta-suggestion-card"
+                        href={card.link || undefined}
+                        target={card.link ? '_blank' : undefined}
+                        rel="noreferrer"
+                      >
+                        {card.image && (
+                          <img
+                            className="ta-suggestion-card-img"
+                            src={card.image}
+                            alt={card.name}
+                          />
+                        )}
+                        <div className="ta-suggestion-card-body">
+                          <strong>{card.name}</strong>
+                          <span>{card.subtitle}</span>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {tripConfirm && (
             <div className="ta-clarify-card">
               <div className="ta-clarify-title">信息确认</div>
@@ -1871,7 +1927,14 @@ export function AgentPage() {
                       type="button"
                       className={`ta-plan-style-card${
                         expandedStyle === style ? ' active' : ''
-                      }`}
+                      }${routePlan.suggestions?.cover_image ? ' has-image' : ''}`}
+                      style={
+                        routePlan.suggestions?.cover_image
+                          ? {
+                              backgroundImage: `linear-gradient(rgba(20, 28, 45, 0.58), rgba(20, 28, 45, 0.72)), url("${routePlan.suggestions.cover_image}")`,
+                            }
+                          : undefined
+                      }
                       disabled={planning}
                       onClick={() => chooseStyle(style)}
                     >

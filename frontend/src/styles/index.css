@@ -2187,10 +2187,22 @@ button:disabled {
   border: 1px solid #e8ebf3;
   border-radius: 12px;
   background: #fff;
+  background-size: cover;
+  background-position: center;
   cursor: pointer;
   font: inherit;
   text-align: left;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ta-plan-style-card.has-image {
+  border-color: transparent;
+}
+
+.ta-plan-style-card.has-image .ta-plan-style-name,
+.ta-plan-style-card.has-image .ta-plan-style-summary {
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
 .ta-plan-style-card:hover {
@@ -2216,6 +2228,80 @@ button:disabled {
 .ta-plan-style-blocks {
   padding: 8px 10px;
   background: #fff;
+}
+
+.ta-suggestion-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 8px;
+  padding: 12px 0 10px;
+  border-top: 1px solid #eef1f6;
+}
+
+.ta-suggestion-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ta-suggestion-group-title {
+  font-size: 12px;
+  font-weight: 750;
+  color: #5b667b;
+}
+
+.ta-suggestion-scroll {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+  scroll-snap-type: x proximity;
+}
+
+.ta-suggestion-card {
+  flex: 0 0 auto;
+  width: 160px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #e8ebf3;
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+  text-decoration: none;
+  scroll-snap-align: start;
+  cursor: pointer;
+}
+
+.ta-suggestion-card:hover {
+  border-color: rgba(82, 103, 255, 0.45);
+  box-shadow: 0 4px 10px rgba(91, 83, 220, 0.1);
+}
+
+.ta-suggestion-card-img {
+  width: 100%;
+  height: 88px;
+  object-fit: cover;
+  background: #eef1f6;
+}
+
+.ta-suggestion-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 11px 11px;
+}
+
+.ta-suggestion-card-body strong {
+  font-size: 13px;
+  color: #25314b;
+  line-height: 1.35;
+}
+
+.ta-suggestion-card-body span {
+  font-size: 11px;
+  color: #8a93a3;
 }
 
 .ta-plan-style-day {

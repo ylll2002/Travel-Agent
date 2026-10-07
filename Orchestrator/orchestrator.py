@@ -183,13 +183,16 @@ def search_node(state: State) -> dict:
 
 
 def plan_node(state: State) -> dict:
+    # 初始的全城美食只用于前端候选展示，规划时不传入（规划用景点锚点周边的美食）。
+    search_for_plan = dict(state.get("search") or {})
+    search_for_plan.pop("food", None)
     payload = {
         "profile": state.get("profile"),
         "preferences": state.get("preferences"),
         "recent_trips": state.get("recent_trips"),
         "recent_trip_summary": state.get("recent_trip_summary"),
         "skip_trip_summary": state.get("skip_trip_summary"),
-        "search": state.get("search"),
+        "search": search_for_plan,
         "basic": state.get("basic"),
     }
     if state.get("feedback"):
@@ -198,8 +201,7 @@ def plan_node(state: State) -> dict:
         payload["modify"] = state["modify"]
     result = _call(PLAN_PYTHON, PLAN_PY, payload)
     search = dict(state.get("search") or {})
-    if isinstance(result.get("food"), list):
-        search["food"] = result["food"]
+    if isinstance(result.get("food_by_anchor"), list):
         search["food_by_anchor"] = result.get("food_by_anchor") or []
     return {"plan": result, "search": search, "iteration": state.get("iteration", 0) + 1}
 

@@ -2135,6 +2135,111 @@ def _ensure_hotels(plan: dict, search_result: dict) -> dict:
     return plan
 
 
+def _build_suggestions(plan: dict, search_result: dict, basic: dict | None) -> dict:
+    """计划完成后生成推荐卡片：封面图 + 4 组未选中的候选。"""
+    selected: set[str] = set()
+    for style in plan.get("plans") or []:
+        for it in style.get("itinerary") or []:
+            for item in it.get("schedule") or []:
+                name = str(item.get("name") or "").strip()
+                if name:
+                    selected.add(name)
+
+    pois = [
+        p for p in (search_result.get("poi") or [])
+        if isinstance(p, dict) and p.get("name")
+    ]
+    hotels = [
+        h for h in (search_result.get("hotels") or [])
+        if isinstance(h, dict) and h.get("name")
+    ]
+    food = [
+        f for f in (search_result.get("food") or [])
+        if isinstance(f, dict) and f.get("name")
+    ]
+
+    def rank_key(p: dict) -> tuple:
+        n = _rank_score(p.get("rank"))
+        return (n == 0, n or 10**9)
+
+    ranked = sorted(pois, key=rank_key)
+    cover_image = next(
+        (str(p.get("image") or "").strip() for p in ranked if p.get("image")),
+        "",
+    )
+    unselected = [p for p in pois if p.get("name") not in selected]
+
+    def poi_card(p: dict) -> dict:
+        match = int(p.get("match_score") or 0)
+        return {
+            "name": p.get("name") or "",
+            "image": p.get("image") or "",
+            "subtitle": f"榜单 {p.get('rank') or '—'} · 匹配度 {match}",
+            "link": p.get("url") or "",
+        }
+
+    spots_rank = [poi_card(p) for p in sorted(unselected, key=rank_key)[:3]]
+    spots_match = [
+        poi_card(p)
+        for p in sorted(unselected, key=lambda p: -(int(p.get("match_score") or 0)))[:3]
+    ]
+
+    unselected_food = [f for f in food if f.get("name") not in selected]
+
+    def food_rating(f: dict) -> float:
+        try:
+            return float(f.get("rating") or 0)
+        except (ValueError, TypeError):
+            return 0.0
+
+    def food_card(f: dict) -> dict:
+        rating = f.get("rating")
+        price = f.get("price_per_person")
+        parts = [f"评分 {rating}" if rating is not None else "暂无评分"]
+        if price is not None:
+            parts.append(f"人均 ¥{price}")
+        return {
+            "name": f.get("name") or "",
+            "image": "",
+            "subtitle": " · ".join(parts),
+            "link": f.get("poi_detail_url") or f.get("map_url") or f.get("url") or "",
+        }
+
+    restaurants = [
+        food_card(f)
+        for f in sorted(unselected_food, key=lambda f: -food_rating(f))[:3]
+    ]
+
+    budget_tiers = (basic or {}).get("budget_tiers") or []
+    budget_tier = budget_tiers[0] if isinstance(budget_tiers, list) and budget_tiers else None
+    budget_hotels = [h for h in hotels if _hotel_in_budget(h, budget_tier)]
+    budget_hotels.sort(
+        key=lambda h: (
+            _hotel_price(h.get("price")) is None,
+            _hotel_price(h.get("price")) or 0,
+        )
+    )
+
+    def hotel_card(h: dict) -> dict:
+        star = h.get("star") or ""
+        price = _hotel_price(h.get("price"))
+        parts = [p for p in (star, f"¥{price:g}" if price is not None else None) if p]
+        return {
+            "name": h.get("name") or "",
+            "image": h.get("image") or "",
+            "subtitle": " · ".join(parts),
+            "link": h.get("url") or "",
+        }
+
+    return {
+        "cover_image": cover_image,
+        "spots_rank": spots_rank,
+        "spots_match": spots_match,
+        "restaurants": restaurants,
+        "hotels": [hotel_card(h) for h in budget_hotels[:3]],
+    }
+
+
 def build_plan(
     search_result: dict,
     profile: dict | None = None,
@@ -2293,6 +2398,7 @@ def build_plan(
             if item.get("type") == "景点" and _valid_food_coord(coord):
                 item.update({"lng": coord[0], "lat": coord[1]})
     result = refresh_food_for_plan(result, search_result, basic)
+    result["suggestions"] = _build_suggestions(result, search_result, basic)
     return _backfill_links(result, search_result)
 
 

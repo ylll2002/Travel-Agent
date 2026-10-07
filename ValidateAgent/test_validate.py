@@ -5,7 +5,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from validate import validate_plan
+from validate import _validate_model as validate_plan
 from shared.audit import normalize_audit
 
 

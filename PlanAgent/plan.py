@@ -41,6 +41,9 @@ from trip_changes import resolve_trip_changes
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 ROOT = BASE_DIR.parent
+sys.path.insert(0, str(ROOT))
+from shared.sources import merge_plan_sources
+
 SEARCH_PY = ROOT / "SearchAgent" / "search.py"
 SEARCH_PYTHON = ROOT / "SearchAgent" / ".venv" / "bin" / "python"
 
@@ -2225,6 +2228,7 @@ def build_plan(
     budget_tiers = (basic or {}).get("budget_tiers") or []
     budget_tier = budget_tiers[0] if isinstance(budget_tiers, list) and budget_tiers else None
     hotels = search_result.get("hotels") or []
+    supplemental_hotels = []
     # 优先在已搜索的酒店里找对应预算且有坐标的；找不到再调 SearchAgent 补搜。
     budget_hotels = [
         h for h in hotels
@@ -2244,7 +2248,9 @@ def build_plan(
                 name = str(h.get("name") or "")
                 if name and name not in seen_names:
                     hotels.append(h)
+                    supplemental_hotels.append(h)
                     seen_names.add(name)
+    search_result["hotels"] = hotels  # Also expose supplemental quotes to price attachment.
     # 每个 10km block 就近安排一个酒店，同 block 的天共用同一酒店。
     block_centroids = _block_centroids(name_to_block, poi_map)
     block_hotels: dict[int, str] = {}
@@ -2293,6 +2299,8 @@ def build_plan(
             if item.get("type") == "景点" and _valid_food_coord(coord):
                 item.update({"lng": coord[0], "lat": coord[1]})
     result = refresh_food_for_plan(result, search_result, basic)
+    if supplemental_hotels:
+        result["source_updates"] = {"hotels": supplemental_hotels}
     return _backfill_links(result, search_result)
 
 
@@ -3269,6 +3277,7 @@ def main() -> None:
             )
             if isinstance(result, dict) and "error" not in result:
                 result["blocks"] = blockify(result)
+                search_result = merge_plan_sources(search_result, result)
                 result = _attach_prices(
                     result, search_result, (basic or {}).get("total_budget"), basic
                 )

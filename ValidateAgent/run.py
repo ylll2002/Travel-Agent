@@ -12,6 +12,7 @@ BASE_DIR = Path(__file__).resolve().parent
 ROOT = BASE_DIR.parent
 sys.path.insert(0, str(ROOT))
 from shared.audit import failed_audit, history_entry, normalize_audit, repair_feedback
+from shared.sources import merge_plan_sources
 
 PLAN_PY = ROOT / "PlanAgent" / "plan.py"
 PLAN_PYTHON = ROOT / "PlanAgent" / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
@@ -41,6 +42,7 @@ def run_loop(context: dict, max_iterations: int = 2) -> dict:
         raise ValueError("规划上下文必须是JSON对象")
     if type(max_iterations) is not int or not 1 <= max_iterations <= 2:
         raise ValueError("审核循环仅允许1至2轮")
+    context = dict(context)  # Do not mutate caller input when carrying supplemental sources.
     history: list[dict] = []
     feedback = None
     plan = None
@@ -52,6 +54,7 @@ def run_loop(context: dict, max_iterations: int = 2) -> dict:
         if not isinstance(plan, dict) or "error" in plan:
             audit = failed_audit("规划失败", "未生成有效方案，无法审核")
         else:
+            context["search"] = merge_plan_sources(context.get("search"), plan)
             try:
                 audit = normalize_audit(validate.validate_plan(
                     plan=plan,
@@ -60,7 +63,7 @@ def run_loop(context: dict, max_iterations: int = 2) -> dict:
                     recent_trips=context.get("recent_trips"),
                     search=context.get("search"),
                     basic=context.get("basic"),
-                ), plan)
+                ), plan, source="mixed")
             except (ValueError, TypeError):
                 audit = failed_audit("审核结果不可用", "审核未返回有效结论", plan)
         history.append(history_entry(i, audit))

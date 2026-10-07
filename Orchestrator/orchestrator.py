@@ -30,6 +30,7 @@ from langgraph.graph import END, START, StateGraph
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from shared.audit import failed_audit, high_actionable_issues, history_entry, normalize_audit, repair_feedback
+from shared.sources import merge_plan_sources
 
 SEARCH_PY = ROOT / "SearchAgent" / "search.py"
 SEARCH_PYTHON = ROOT / "SearchAgent" / ".venv" / "bin" / "python"
@@ -199,42 +200,8 @@ def plan_node(state: State) -> dict:
     if state.get("modify"):
         payload["modify"] = state["modify"]
     result = _call(PLAN_PYTHON, PLAN_PY, payload)
-    search = dict(state.get("search") or {})
-    if isinstance(result.get("food"), list):
-        search["food"] = result["food"]
-        search["food_by_anchor"] = result.get("food_by_anchor") or []
+    search = merge_plan_sources(state.get("search"), result)
     return {"plan": result, "search": search, "iteration": state.get("iteration", 0) + 1}
-
-
-def _plan_for_validate(plan: dict | None) -> dict | None:
-    """审核实际选择和交通耗时，不重复发送地图折线或全部备选餐厅。"""
-    if not isinstance(plan, dict):
-        return plan
-    trimmed = deepcopy(plan)
-    trimmed.pop("food", None)
-    trimmed.pop("food_by_anchor", None)
-    trimmed["legs"] = [{k: v for k, v in leg.items() if k != "polyline"} for leg in plan.get("legs") or []]
-    for block in trimmed.get("blocks") or []:
-        block.pop("options", None)
-    for style in trimmed.get("plans") or []:
-        for day in style.get("itinerary") or []:
-            for item in day.get("schedule") or []:
-                item.pop("options", None)
-    return trimmed
-
-
-def _search_for_validate(search: dict | None, plan: dict | None) -> dict:
-    """保留天气与已选资源的来源信息，减少无关候选带来的审核等待。"""
-    search = search or {}
-    names = {str(block.get("name") or "") for block in (plan or {}).get("blocks") or []}
-    compact = {key: deepcopy(search[key]) for key in ("destination", "start_date", "end_date", "weather") if key in search}
-    for key in ("poi", "hotels", "food", "events", "flights", "trains"):
-        value = search.get(key)
-        if isinstance(value, list):
-            compact[key] = [item for item in value if isinstance(item, dict) and str(item.get("name") or item.get("title") or "") in names]
-        elif isinstance(value, dict) and key in ("flights", "trains"):
-            compact[key] = {direction: items[:5] for direction, items in value.items() if isinstance(items, list)}
-    return compact
 
 
 def _high_actionable_issues(audit: dict | None) -> list[dict]:
@@ -246,16 +213,16 @@ def validate_node(state: State) -> dict:
         VALIDATE_PYTHON,
         VALIDATE_PY,
         {
-            "plan": _plan_for_validate(state.get("plan")),
+            "plan": state.get("plan"),
             "profile": state.get("profile"),
             "preferences": state.get("preferences"),
             "recent_trips": state.get("recent_trips"),
-            "search": _search_for_validate(state.get("search"), state.get("plan")),
+            "search": state.get("search"),
             "basic": state.get("basic"),
         },
     )
     try:
-        result = normalize_audit(result, state.get("plan"))
+        result = normalize_audit(result, state.get("plan"), source="mixed")
     except (ValueError, TypeError):
         error = (result.get("error") if isinstance(result, dict) else None) or "审核结果不可用"
         result = failed_audit(error, "审核未返回有效结论", state.get("plan"))

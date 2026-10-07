@@ -361,12 +361,22 @@ def _source_checks(search, rows, issues):
         keys = SOURCES.get(b.get("type"))
         if not keys or b.get("name") in UNNAMED_ACTIVITIES:
             continue
+        # The website stores the chosen option as a zero-based integer index;
+        # legacy callers may supply a name. Zero is a valid selection.
+        selected = b.get("selected_option")
+        options = b.get("options") or []
+        selected_index = type(selected) is int and isinstance(options, list) and 0 <= selected < len(options)
+        selected_name = isinstance(selected, str) and bool(selected.strip())
+        is_selected = b.get("user_selected") is True or selected_index or selected_name
         # Option groups are not a selected venue and must not count every alternative.
-        if not b.get("selected_option") and (b.get("name") in MEAL_LABELS or (b.get("options") and re.search(r"可选|餐饮推荐", str(b.get("name") or "") + str(b.get("note") or "")))):
+        if not is_selected and (b.get("name") in MEAL_LABELS or (b.get("options") and re.search(r"可选|餐饮推荐", str(b.get("name") or "") + str(b.get("note") or "")))):
             _add(issues, "真实性", "medium", "餐饮选项尚未确定实际地点，暂不计入已选地点来源覆盖率。",
                  "选择具体餐厅后再次检查。", [row], [_evidence(path, b)])
             continue
-        name = b.get("selected_option") or b.get("name")
+        name = selected if selected_name else b.get("name")
+        if selected_index and (not name or name in MEAL_LABELS or "可选" in str(name)):
+            option = options[selected]
+            name = option.get("name") if isinstance(option, dict) else None
         if not isinstance(name, str) or not name.strip():
             _add(issues, "真实性", "medium", "活动缺少具体地点名称，来源待核实。", "补充地点名称和来源。", [row], [_evidence(path, b)])
             continue

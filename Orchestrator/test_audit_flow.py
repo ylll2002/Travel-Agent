@@ -98,5 +98,68 @@ class AuditFlowTests(unittest.TestCase):
                 self.assertTrue(result["history"][0]["error"])
 
 
+class HybridFlowTests(unittest.TestCase):
+    def execute(self, model_error=False):
+        from ValidateAgent.rules import validate_rules
+        from shared.audit import combine_audits, failed_audit
+        calls = []
+        plans = 0
+        search = {"poi": [{"name": "博物馆", "url": "https://example.test/museum"}]}
+
+        def call(python, script, payload):
+            nonlocal plans
+            calls.append((script.name, payload))
+            if script == flow.SEARCH_PY:
+                return search
+            if script == flow.PLAN_PY:
+                plans += 1
+                return {"revision": plans, "blocks": [{"id": "v1", "type": "景点", "name": "博物馆",
+                        "plan_style": "经典", "day": 1, "date": "2026-10-10", "time": "09:00-11:00",
+                        "price": 120 if plans == 1 else 30, "price_known": True}]}
+            if script == flow.VALIDATE_PY:
+                rule = validate_rules(payload["plan"], payload["search"], payload["basic"])
+                if not rule["passed"]:
+                    return combine_audits(rule, plan=payload["plan"])
+                model = failed_audit("模型超时", "请重试", payload["plan"]) if model_error else {
+                    "passed": True, "issues": [{"severity": "low", "type": "偏好",
+                                               "detail": "可以加入自然风景", "suggestion": "按兴趣微调"}]}
+                return combine_audits(rule, model, payload["plan"])
+            raise AssertionError("unexpected subprocess")
+
+        with patch.object(flow, "_call", side_effect=call):
+            result = flow.build_graph().invoke({"destination": "杭州", "start_date": "2026-10-10",
+                "end_date": "2026-10-10", "basic": {"total_budget": 100}},
+                {"configurable": {"thread_id": "hybrid-test"}})
+        return result, calls
+
+    def test_actual_rules_repair_once_and_keep_both_origins(self):
+        result, calls = self.execute()
+        self.assertEqual(result["iteration"], 2)
+        self.assertEqual([name for name, _ in calls].count("search.py"), 1)
+        self.assertEqual([h["status"] for h in result["history"]], ["blocked", "warning"])
+        self.assertEqual(result["history"][0]["checks"]["model"], "skipped")
+        self.assertEqual(result["audit"]["checks"]["model"], "completed")
+        self.assertEqual({i["source"] for i in result["audit"]["issues"]}, {"rule", "model"})
+        self.assertEqual(result["audit"]["rule_summary"]["budget_by_style"]["经典"]["known_cost"], 30)
+        self.assertEqual(result["history"][1]["plan_revision"], 2)
+
+    def test_model_error_preserves_completed_rule_checks_without_another_repair(self):
+        result, _ = self.execute(model_error=True)
+        self.assertEqual(result["iteration"], 2)
+        self.assertEqual(result["audit"]["status"], "error")
+        self.assertEqual(result["history"][1]["checks"], {"rules": "completed", "model": "error"})
+        self.assertTrue(result["history"][1]["rule_summary"])
+        self.assertTrue(all(i["source"] == "rule" for i in result["audit"]["issues"]))
+        self.assertIsNone(result["feedback"])
+
+    def test_plan_node_merges_actual_supplemental_hotel_sources(self):
+        source = {"hotels": [{"name": "旧酒店"}]}
+        extra = {"name": "补搜酒店", "price": 200}
+        with patch.object(flow, "_call", return_value={"blocks": [], "source_updates": {"hotels": [extra]}}):
+            result = flow.plan_node({"search": source})
+        self.assertEqual(result["search"]["hotels"], [{"name": "旧酒店"}, extra])
+        self.assertEqual(source, {"hotels": [{"name": "旧酒店"}]})
+
+
 if __name__ == "__main__":
     unittest.main()

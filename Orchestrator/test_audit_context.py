@@ -3,7 +3,7 @@ import unittest
 
 from unittest.mock import patch
 import orchestrator as flow
-from orchestrator import _plan_for_validate, _search_for_validate
+from ValidateAgent.context import plan_for_model as _plan_for_validate, search_for_model as _search_for_validate
 
 
 class AuditContextTests(unittest.TestCase):
@@ -20,7 +20,7 @@ class AuditContextTests(unittest.TestCase):
         self.assertEqual(result["blocks"][0]["distance_m"], 120)
         self.assertEqual(result["legs"], [{"duration": 120}])
         self.assertEqual(result["unpriced_items"], {"推荐": ["酒店"]})
-        self.assertNotIn("options", result["blocks"][0])
+        self.assertEqual(result["blocks"][0]["options"], meal["options"])
         self.assertNotIn("food_by_anchor", result)
         self.assertEqual(plan, original)
 
@@ -30,7 +30,7 @@ class AuditContextTests(unittest.TestCase):
                            {"name": "其他餐厅"}], "social_food": [{"text": "长文"}]}
         result = _search_for_validate(search, {"blocks": [{"name": "选中餐厅"}]})
         self.assertEqual(result["weather"], search["weather"])
-        self.assertEqual(result["food"], search["food"][:1])
+        self.assertEqual(result["food"], search["food"])
         self.assertNotIn("social_food", result)
 
     def test_main_flow_preserves_audit_locations_revision_and_history(self):
@@ -46,7 +46,8 @@ class AuditContextTests(unittest.TestCase):
         payload = call.call_args.args[2]
         for key in ("profile", "preferences", "recent_trips", "basic"):
             self.assertEqual(payload[key], state[key])
-        self.assertEqual(payload["search"]["weather"], state["search"]["weather"])
+        self.assertEqual(payload["search"], state["search"])
+        self.assertEqual(payload["plan"], plan)
         self.assertEqual(result["audit"]["plan_revision"], 7)
         self.assertEqual(result["audit"]["status"], "blocked")
         self.assertEqual(result["history"][0]["issues"][0]["block_ids"], ["b1"])

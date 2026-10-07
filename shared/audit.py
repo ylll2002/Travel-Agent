@@ -8,10 +8,12 @@ ISSUE_TYPES = {"预算", "交通", "偏好", "天气", "时间", "完整性", "�
 
 def _plan_context(plan):
     plan = plan if isinstance(plan, dict) else {}
-    records = [b for b in plan.get("blocks") or [] if isinstance(b, dict)]
+    blocks = plan.get("blocks")
+    records = [b for b in blocks if isinstance(b, dict)] if isinstance(blocks, list) else []
     styles = list(dict.fromkeys(b.get("plan_style") for b in records
                               if isinstance(b.get("plan_style"), str) and b["plan_style"]))
-    for item in plan.get("plans") or []:
+    plans = plan.get("plans")
+    for item in plans if isinstance(plans, list) else []:
         if not isinstance(item, dict):
             continue
         style = item.get("style")
@@ -19,11 +21,13 @@ def _plan_context(plan):
             if style not in styles:
                 styles.append(style)
             records.append({"plan_style": style})
-        for day in item.get("itinerary") or []:
+        itinerary = item.get("itinerary")
+        for day in itinerary if isinstance(itinerary, list) else []:
             if not isinstance(day, dict):
                 continue
             records.append({"plan_style": style, "day": day.get("day"), "date": day.get("date")})
-            for block in day.get("schedule") or []:
+            schedule = day.get("schedule")
+            for block in schedule if isinstance(schedule, list) else []:
                 if isinstance(block, dict):
                     records.append({**block, "plan_style": style, "day": day.get("day"), "date": day.get("date")})
     return records, styles
@@ -83,17 +87,17 @@ def failed_audit(error, feedback, plan=None):
 def normalize_audit(raw, plan=None, source="model"):
     """Validate structure and locations; never turn a failed verdict into a pass.
 
-    Legacy issue locations/evidence may be absent. This does not prove grounding;
-    evidence verification belongs to the deterministic rules in the next stage.
+    Model/rule adapters assign provenance. Only trusted internal consumers use
+    source="mixed" to preserve both origins and completed-check metadata.
     """
     if not isinstance(raw, dict) or not isinstance(raw.get("passed"), bool):
         raise ValueError("audit requires boolean passed")
     version = raw.get("schema_version", SCHEMA_VERSION)
     if type(version) is not int or version != SCHEMA_VERSION:
         raise ValueError("unsupported audit schema")
-    if source not in ("model", "rule"):
+    if source not in ("model", "rule", "mixed"):
         raise ValueError("invalid issue source")
-    if raw.get("error"):
+    if raw.get("error") and source != "mixed":
         return failed_audit(str(raw["error"]), str(raw.get("feedback") or "审核未能完成"), plan)
     issues = raw.get("issues")
     if not isinstance(issues, list):
@@ -102,13 +106,33 @@ def normalize_audit(raw, plan=None, source="model"):
     if not isinstance(feedback, str):
         raise ValueError("feedback must be text")
     records, styles = _plan_context(plan)
-    normalized = [_issue(i, records, source) for i in issues]
-    if raw["passed"] and any(i["severity"] == "high" for i in normalized):
+    normalized = []
+    for item in issues:
+        origin = item.get("source", "model") if source == "mixed" and isinstance(item, dict) else source
+        if origin not in ("model", "rule"):
+            raise ValueError("invalid issue source")
+        normalized.append(_issue(item, records, origin))
+    if not raw.get("error") and raw["passed"] and any(i["severity"] == "high" for i in normalized):
         raise ValueError("passing verdict contradicts high severity issue")
     status = "blocked" if not raw["passed"] else "warning" if normalized else "passed"
-    return {"schema_version": SCHEMA_VERSION, "status": status, "passed": raw["passed"],
-            "plan_revision": _revision(plan), "reviewed_styles": styles,
-            "issues": normalized, "feedback": feedback}
+    result = {"schema_version": SCHEMA_VERSION, "status": status, "passed": raw["passed"],
+              "plan_revision": _revision(plan), "reviewed_styles": styles,
+              "issues": normalized, "feedback": feedback}
+    if raw.get("error"):
+        result.update(status="error", passed=False, error=str(raw["error"]))
+    if source == "mixed":
+        if "rule_summary" in raw:
+            if not isinstance(raw["rule_summary"], dict):
+                raise ValueError("rule_summary must be an object")
+            result["rule_summary"] = deepcopy(raw["rule_summary"])
+        if "checks" in raw:
+            checks = raw["checks"]
+            if (not isinstance(checks, dict) or set(checks) != {"rules", "model"}
+                    or checks["rules"] not in ("completed", "error")
+                    or checks["model"] not in ("completed", "skipped", "error")):
+                raise ValueError("invalid completed checks")
+            result["checks"] = dict(checks)
+    return result
 
 
 def high_actionable_issues(audit):
@@ -132,4 +156,43 @@ def repair_feedback(audit):
 
 def history_entry(iteration, audit):
     return {"iteration": iteration, **{k: deepcopy(audit[k]) for k in
-            ("schema_version", "status", "passed", "plan_revision", "reviewed_styles", "issues", "feedback", "error") if k in audit}}
+            ("schema_version", "status", "passed", "plan_revision", "reviewed_styles", "issues", "feedback", "error", "rule_summary", "checks") if k in audit}}
+
+
+def combine_audits(rule_audit, model_audit=None, plan=None):
+    """Union trusted adapter results; no model pass can erase rule conflicts.
+
+    Rule blocks short-circuit the model in the public validator. A successful
+    rule-only result cannot represent a completed hybrid review.
+    """
+    import json
+    rule = normalize_audit(rule_audit, plan, source="rule")
+    model = normalize_audit(model_audit, plan, source="model") if model_audit is not None else None
+    issues, indexed = [], {}
+    for audit in (rule, model):
+        for item in (audit or {}).get("issues", []):
+            # Exact duplicate judgments use rule provenance, never fuzzy matching.
+            key = json.dumps({k: v for k, v in item.items() if k not in ("source", "evidence")},
+                             ensure_ascii=False, sort_keys=True)
+            if key in indexed:
+                existing = indexed[key]
+                for evidence in item["evidence"]:
+                    if evidence not in existing["evidence"]:
+                        existing["evidence"].append(deepcopy(evidence))
+                continue
+            indexed[key] = deepcopy(item)
+            issues.append(indexed[key])
+    blocked = any(i["severity"] == "high" for i in issues)
+    result = {"passed": not blocked, "issues": issues,
+              "feedback": "存在严重问题，请按定位修正。" if blocked else
+                          "审核通过；请在出行前核实风险提示。" if issues else "规则与模型审核通过。",
+              "checks": {"rules": "error" if rule.get("error") else "completed",
+                         "model": "skipped" if model is None else "error" if model.get("error") else "completed"}}
+    if isinstance(rule_audit.get("rule_summary"), dict):
+        result["rule_summary"] = deepcopy(rule_audit["rule_summary"])
+    failure = rule if rule.get("error") else model if model and model.get("error") else None
+    if failure:
+        result.update(passed=False, error=failure["error"], feedback=failure["feedback"])
+    elif model is None and not blocked:
+        result.update(passed=False, error="模型审核尚未完成", feedback="仅规则通过，完整审核仍需模型结论。")
+    return normalize_audit(result, plan, source="mixed")

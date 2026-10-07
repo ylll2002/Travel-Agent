@@ -7,7 +7,7 @@ export function HomePage() {
     <div className="agent-page home-page">
       <div className="home-center">
         <header className="agent-hero">
-          <span className="agent-kicker">✦ TravelAgent · 你的 AI 旅行规划师</span>
+          <span className="agent-kicker">TravelAgent · 你的 AI 旅行规划师</span>
           <h1>
             准备好开始
             <br />

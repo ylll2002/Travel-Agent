@@ -85,9 +85,25 @@ Orchestrator/.venv/bin/python -m unittest discover -s Orchestrator -p 'test_audi
 
 网站修改已有方案后已在路线和费用更新完成时重新审核，新结论绑定递增的 revision。
 审核失败会保留修改并标记 error，旧版本的通过结论失效。修改不会因审核建议再次自动重写。
-网页现有展示不会呈现全部新增指标；详细问题定位和页面状态提示属于第五阶段。
+网页已显示当前版本的审核状态、问题定位、原因、建议、依据及来源覆盖指标；严重问题或未完成审核时不能确认。
 离线测试均不调用真实模型；真实模型的证据输出质量仍需用实际搜索快照验收。
 
 第四阶段还会保留原有明确需求、长期偏好和历史行程上下文。
 修改接口维持扁平方案响应；生成接口仍返回 plan/audit/history 的原有包装结构。
-前端自动验证可在 frontend 运行 `npm run test:review`，完整网站手动验收可留到第五阶段完成后。
+前端自动验证可在 frontend 运行 `npm run test:review`，五阶段已完成代码接入，完整网站手动验收步骤见审核文档的第五阶段。
+
+
+## 可复现评估报告
+
+在项目根目录运行：
+
+```bash
+python3 -S ValidateAgent/evaluate.py
+python3 -S ValidateAgent/evaluate.py --check
+```
+
+默认只使用标准库和固定合成案例，不调用模型或网络。
+[报告](evaluation/report.md)展示预期状态、严重问题定位、误报/漏报、证据值匹配与来源覆盖。
+`hybrid_fixture` 是预置模型输出的组合回归测试，不能用其分数声称真实模型准确率。
+案例与完整问题报告分别保存在 `evaluation/cases.json` 和 `evaluation/report.json`。
+网页遇到审核错误时可单独重试审核，保留版本和活动；其接口为 `/api/plan/review`。

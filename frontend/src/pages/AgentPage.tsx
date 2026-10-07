@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { api } from '../api/client';
 import { TripMap } from '../components/TripMap';
@@ -6,8 +6,9 @@ import type { RouteBlock, RouteLeg } from '../components/TripMap';
 import { TripQuestions } from '../components/TripQuestions';
 import type { TripQuestion } from '../components/TripQuestions';
 import { usePlanStream } from '../hooks/usePlanStream';
-import { currentAudit, reviewMessage } from '../lib/planReview';
-import type { PlanAudit, ReviewContext } from '../lib/planReview';
+import { confirmationReason, currentAudit, issueTarget, reviewMessage } from '../lib/planReview';
+import { PlanReviewPanel } from '../components/PlanReviewPanel';
+import type { AuditIssue, PlanAudit, ReviewContext } from '../lib/planReview';
 
 type ChatMessage = {
   id: string;
@@ -388,6 +389,9 @@ export function AgentPage() {
     instruction: string;
   } | null>(null);
   const [routePlan, setRoutePlan] = useState<RoutePlan | null>(null);
+  const [reviewLocation, setReviewLocation] = useState<ReturnType<typeof issueTarget>>(null);
+  const activityRefs = useRef(new Map<string, HTMLDivElement>());
+  const dayRefs = useRef(new Map<number, HTMLDivElement>());
   const [activeStyle, setActiveStyle] = useState('');
   const [activeDay, setActiveDay] = useState<number | 'all'>('all');
   const [expandedStyle, setExpandedStyle] = useState<string | null>(null);
@@ -426,6 +430,67 @@ export function AgentPage() {
   const [isMapHidden, setIsMapHidden] = useState(false);
   const mapDragRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
   const { start: startPlanStream, stop: stopPlanStream } = usePlanStream();
+
+  const confirmDisabledReason = confirmationReason(routePlan, planning, selectedBlocks.size);
+  useEffect(() => {
+    setReviewLocation(null);
+    setConfirmModalOpen(false);
+  }, [routePlan?.revision, routePlan?.audit]);
+  useEffect(() => {
+    if (!reviewLocation || expandedStyle !== reviewLocation.style) return;
+    const element = reviewLocation.ids.length
+      ? activityRefs.current.get(reviewLocation.ids[0]) : dayRefs.current.get(reviewLocation.day);
+    element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    element?.focus({ preventScroll: true });
+  }, [reviewLocation, expandedStyle]);
+
+  function locateReviewIssue(issue: AuditIssue) {
+    if (!routePlan || planning) return;
+    const target = issueTarget(issue, routePlan.blocks);
+    if (!target) return;
+    setActiveStyle(target.style);
+    setExpandedStyle(target.style);
+    setActiveDay(target.day);
+    setReviewLocation(target);
+  }
+
+  async function retryReview() {
+    if (!routePlan || planning || !routePlan.revision) return;
+    const snapshot = routePlan;
+    const controller: AbortController & { mutation?: boolean } = new AbortController();
+    controller.mutation = true;
+    const version = ++planRequestVersionRef.current;
+    requestControllerRef.current = controller;
+    // Do not restore a failed/obsolete verdict if this review is cancelled.
+    setRoutePlan(prev => prev ? { ...prev, audit: null, review_pending: true } : prev);
+    setPlanning(true);
+    try {
+      const raw = await api.reviewPlan({ plan: snapshot, search: committedSearchRef.current }, controller.signal);
+      if (controller.signal.aborted || requestControllerRef.current !== controller || version !== planRequestVersionRef.current) return;
+      const audit = currentAudit(raw.audit, snapshot.revision);
+      if (raw.revision !== snapshot.revision || !audit) throw new Error('审核结果不属于当前行程，请重试。');
+      setRoutePlan(prev => prev && prev.revision === snapshot.revision ? { ...prev, audit, review_pending: false,
+        history: Array.isArray(raw.history) ? raw.history : [],
+        review_context: raw.review_context as ReviewContext | undefined ?? prev.review_context } : prev);
+      addAssistantMessage(reviewMessage(audit));
+    } catch (error) {
+      if (!controller.signal.aborted && requestControllerRef.current === controller && version === planRequestVersionRef.current) {
+        const reason = error instanceof Error ? error.message : String(error);
+        const previous = currentAudit(snapshot.audit, snapshot.revision);
+        setRoutePlan(prev => prev && prev.revision === snapshot.revision ? { ...prev, review_pending: false,
+          audit: { schema_version: 1, plan_revision: snapshot.revision!, status: 'error', passed: false,
+            error: reason, issues: previous?.issues.filter(issue => issue.source === 'rule') ?? [],
+            rule_summary: previous?.rule_summary } } : prev);
+        addAssistantMessage(`审核未完成：${reason}。现有行程已保留。`);
+      }
+    } finally {
+      if (requestControllerRef.current === controller && version === planRequestVersionRef.current) {
+        setRoutePlan(prev => prev ? { ...prev, review_pending: false } : prev);
+        requestControllerRef.current = null;
+        setPlanning(false);
+      }
+    }
+  }
 
   const styleBlocks = useMemo(
     () => routePlan?.blocks.filter((b) => b.plan_style === activeStyle) ?? [],
@@ -1376,7 +1441,7 @@ export function AgentPage() {
   }
 
   function confirmPlan() {
-    if (!expandedStyle || !routePlan || planning) return;
+    if (!expandedStyle || !routePlan || confirmDisabledReason) return;
     setPlanRating(null);
     setPlanFeedback('');
     setSaveState('idle');
@@ -1388,13 +1453,14 @@ export function AgentPage() {
   }
 
   async function acceptPlan() {
-    if (!expandedStyle || !routePlan) return;
+    if (!expandedStyle || !routePlan || confirmDisabledReason || saveState === 'saving') return;
     const userId = localStorage.getItem('currentUser') || '';
     if (!userId) {
       setSaveState('error');
       setConfirmModalOpen(false);
       return;
     }
+    const savedRequestVersion = planRequestVersionRef.current;
     setSaveState('saving');
     try {
       const payload: Parameters<typeof api.saveTripMemory>[0] = {
@@ -1409,6 +1475,7 @@ export function AgentPage() {
       if (planRating != null) payload.rating = planRating;
       if (planFeedback.trim()) payload.feedback = planFeedback.trim();
       await api.saveTripMemory(payload);
+      if (savedRequestVersion !== planRequestVersionRef.current) return;
       setConfirmedStyle(expandedStyle);
       setSaveState('saved');
       setConfirmModalOpen(false);
@@ -1417,7 +1484,7 @@ export function AgentPage() {
         void api.reportBehavior(userId, 'rate', expandedStyle, String(planRating));
       }
     } catch {
-      setSaveState('error');
+      if (savedRequestVersion === planRequestVersionRef.current) setSaveState('error');
     }
   }
 
@@ -1668,6 +1735,8 @@ export function AgentPage() {
 
         {/* 中间：旅行计划 */}
         <section className="ta-plan-card ta-plan-column">
+          {routePlan && <PlanReviewPanel plan={routePlan} busy={planning}
+            onLocate={locateReviewIssue} onRetry={() => void retryReview()} />}
           {expandedStyle && routePlan ? (
             <div className="ta-plan-detail">
               <button type="button" className="ta-plan-detail-back" onClick={() => setExpandedStyle(null)}>
@@ -1709,7 +1778,8 @@ export function AgentPage() {
                     const dayDate = dayBlocks[0]?.date ?? '';
                     const weather = (weatherData?.days ?? []).find((d) => d.date === dayDate);
                     return (
-                      <div key={day} className="ta-plan-style-day">
+                      <div key={day} className="ta-plan-style-day" tabIndex={-1}
+                        ref={element => { if (element) dayRefs.current.set(day, element); else dayRefs.current.delete(day); }}>
                         <div className="ta-plan-style-day-label">Day {day}</div>
                         {weather && (
                           <div className="ta-plan-block ta-plan-block-weather">
@@ -1728,9 +1798,10 @@ export function AgentPage() {
                         {dayBlocks.map((block) => (
                           <div
                             key={block.id}
+                            ref={element => { if (element) activityRefs.current.set(block.id, element); else activityRefs.current.delete(block.id); }}
                             className={`ta-plan-block ta-plan-block-${block.type}${
                               selectedBlocks.has(block.id) ? ' selected' : ''
-                            }`}
+                            }${reviewLocation?.style === expandedStyle && reviewLocation.ids.includes(block.id) ? ' ta-review-highlight' : ''}`}
                             onClick={(event) => {
                               if (!(event.target as Element).closest('button, a, input')) toggleBlock(block.id);
                             }}
@@ -1830,12 +1901,14 @@ export function AgentPage() {
                 <button
                   type="button"
                   className="ta-plan-confirm-button"
-                  disabled={planning}
+                  disabled={!!confirmDisabledReason}
+                  title={confirmDisabledReason || undefined}
                   onClick={confirmPlan}
                 >
                   确认计划
                 </button>
               )}
+              {confirmDisabledReason && <p className="ta-review-confirm-hint">{confirmDisabledReason}</p>}
             </div>
           ) : (
             <>
@@ -2458,7 +2531,7 @@ export function AgentPage() {
                       className={`ta-plan-rating-button${
                         planRating === option.value ? ' active' : ''
                       }`}
-                      disabled={saveState === 'saving'}
+                      disabled={saveState === 'saving' || !!confirmDisabledReason}
                       onClick={() => setPlanRating(option.value)}
                     >
                       {option.label}
@@ -2494,7 +2567,7 @@ export function AgentPage() {
               <button
                 type="button"
                 className="ta-primary-button"
-                disabled={saveState === 'saving'}
+                disabled={saveState === 'saving' || !!confirmDisabledReason}
                 onClick={() => void acceptPlan()}
               >
                 {saveState === 'saving' ? '保存中…' : '确认接受'}

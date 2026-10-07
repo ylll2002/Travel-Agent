@@ -5660,3 +5660,29 @@ button:disabled {
     padding-right: 18px;
   }
 }
+
+
+/* Current-version audit stays visible above the scrollable itinerary. */
+.ta-review { flex: 0 0 auto; border: 1px solid #d5deec; border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; background: #f8faff; font-size: 13px; overflow-wrap: anywhere; }
+.ta-review-header { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.ta-review-header strong { font-size: 15px; }
+.ta-review-header span, .ta-review small { color: #53647d; }
+.ta-review p { margin: 5px 0; }
+.ta-review-passed { border-color: #95c5ad; background: #f2fbf5; }
+.ta-review-warning { border-color: #ddbf79; background: #fffaf0; }
+.ta-review-blocked, .ta-review-error { border-color: #dc9b98; background: #fff6f5; }
+.ta-review-checks { color: #4d5c70; font-size: 12px; }
+.ta-review summary { cursor: pointer; padding: 5px 0; }
+.ta-review-issues { list-style: none; padding: 0; margin: 0; max-height: 210px; overflow-y: auto; }
+.ta-review-issue { border-top: 1px solid #dce1e8; padding: 8px 0; }
+.ta-review-issue-high .ta-review-issue-meta strong { color: #a32924; }
+.ta-review button { border: 1px solid #8e9acb; border-radius: 7px; color: #354795; background: white; padding: 5px 9px; margin-top: 5px; cursor: pointer; }
+.ta-review button:disabled { opacity: .5; cursor: default; }
+.ta-review-evidence { font-size: 11px; color: #53647d; }
+.ta-review-evidence ul { padding-left: 16px; }
+.ta-review-evidence span { display: block; white-space: pre-wrap; }
+.ta-plan-block.ta-review-highlight { outline: 3px solid #d38a1b; outline-offset: -3px; background: #fff6df; }
+.ta-review-confirm-hint { margin: 6px 0 0; font-size: 12px; color: #8a4024; }
+
+.ta-plan-column > .ta-review { max-height: 45%; overflow-y: auto; }
+.ta-plan-column > .ta-plan-detail { flex: 1 1 0; height: auto; }

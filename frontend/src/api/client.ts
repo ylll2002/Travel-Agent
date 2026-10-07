@@ -75,6 +75,10 @@ export const api = {
       body: JSON.stringify(payload),
       signal,
     }),
+  reviewPlan: (payload: { plan: unknown; search: unknown }, signal?: AbortSignal) =>
+    request<Record<string, unknown>>('/plan/review', {
+      method: 'POST', body: JSON.stringify(payload), signal,
+    }),
   chat: (messages: ChatMessage[]) =>
     request<ChatResponse>('/agent/chat', {
       method: 'POST',

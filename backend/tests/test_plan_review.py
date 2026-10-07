@@ -2,6 +2,8 @@
 import copy
 import unittest
 from unittest.mock import patch
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
 
 from app.api.routes import plan as routes
 from shared.audit import combine_audits, failed_audit, normalize_audit
@@ -138,6 +140,82 @@ class ModificationReviewTests(unittest.TestCase):
             result = routes.create_plan(self.request({"action": "delete", "block_ids": ["v1"]}))
         self.assertEqual(result, {"error": "route failure"})
         runner.assert_called_once()
+
+
+class ReviewRetryTests(unittest.TestCase):
+    setUp = ModificationReviewTests.setUp
+    runner = ModificationReviewTests.runner
+    # Reuse fixed snapshots and the real-rule subprocess substitute.
+    def retry_request(self):
+        plan = copy.deepcopy(self.old)
+        plan.update(destination="杭州", start_date="2026-10-10", end_date="2026-10-11",
+                    review_context={"preferences": {"culture": True}})
+        return routes.PlanRequest(plan=plan, search=self.source)
+
+    def test_retry_reviews_once_without_finalizing_or_changing_revision(self):
+        payload = self.retry_request()
+        original = copy.deepcopy(payload.plan)
+        with patch.object(routes, "_run_json", side_effect=self.runner):
+            result = routes.review_plan(payload)
+        self.assertEqual([s for s, _ in self.calls], [routes.VALIDATE_PY])
+        self.assertEqual(result["revision"], 4)
+        self.assertEqual(result["audit"]["plan_revision"], 4)
+        self.assertEqual(result["audit"]["status"], "passed")
+        for key in ("blocks", "basic", "start_date", "end_date"):
+            self.assertEqual(result[key], original[key])
+        self.assertEqual(self.calls[0][1]["preferences"], {"culture": True})
+        self.assertNotIn("audit", self.calls[0][1]["plan"])
+        self.assertEqual(payload.plan, original)
+
+    def test_retry_empty_plan_is_blocked_and_never_generated(self):
+        payload = self.retry_request()
+        payload.plan["blocks"] = []
+        with patch.object(routes, "_run_json", side_effect=self.runner):
+            result = routes.review_plan(payload)
+        self.assertEqual(result["audit"]["status"], "blocked")
+        self.assertEqual(len(self.calls), 1)
+
+    def test_retry_rejects_hidden_edits_and_bad_versions_before_any_subprocess(self):
+        changes = [{"basic": {"total_budget": 999}}, {"start_date": "2026-10-12"},
+                   {"modify": {"action": "delete"}}, {"destination": "上海"}]
+        for change in changes:
+            with self.subTest(change=change), patch.object(routes, "_run_json") as run:
+                payload = self.retry_request()
+                for key, value in change.items():
+                    setattr(payload, key, value)
+                with self.assertRaises(HTTPException):
+                    routes.review_plan(payload)
+                run.assert_not_called()
+        for revision in (None, True, 0, -1, 4.5):
+            with self.subTest(revision=revision), patch.object(routes, "_run_json") as run:
+                payload = self.retry_request()
+                payload.plan["revision"] = revision
+                with self.assertRaises(HTTPException):
+                    routes.review_plan(payload)
+                run.assert_not_called()
+
+    def test_http_retry_route_uses_review_service_and_validates_request(self):
+        app = FastAPI()
+        app.include_router(routes.router, prefix="/api")
+        client = TestClient(app)
+        with patch.object(routes, "_run_json", side_effect=self.runner):
+            response = client.post("/api/plan/review", json=self.retry_request().model_dump())
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["audit"]["plan_revision"], 4)
+        self.assertEqual([script for script, _ in self.calls], [routes.VALIDATE_PY])
+        with patch.object(routes, "_run_json") as run:
+            self.assertEqual(client.post("/api/plan/review", json={"plan": {"revision": True}}).status_code, 422)
+            run.assert_not_called()
+
+    def test_retry_failure_retains_plan_but_never_old_success(self):
+        for raw in ({"error": "服务不可用"}, normalize_audit({"passed": True, "issues": []}, {"revision": 3})):
+            payload = self.retry_request()
+            with self.subTest(raw=raw), patch.object(routes, "_run_json", return_value=raw):
+                result = routes.review_plan(payload)
+            self.assertEqual(result["blocks"], payload.plan["blocks"])
+            self.assertEqual(result["revision"], 4)
+            self.assertEqual(result["audit"]["status"], "error")
+            self.assertFalse(result["passed"])
 
 
 if __name__ == "__main__":

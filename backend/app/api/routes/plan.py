@@ -223,7 +223,7 @@ def _review_modified_plan(plan: dict, search: dict, basic: dict, profile: dict |
             raise ValueError("review version mismatch")
         audit = normalize_audit(raw, reviewed, source="mixed")
     except (AttributeError, ValueError, TypeError):
-        audit = failed_audit("修改后的审核未能完成", "修改已保留，当前版本需要重新审核；旧审核结论已失效。", reviewed)
+        audit = failed_audit("当前行程的审核未能完成", "行程已保留，当前版本需要重新审核；旧审核结论不能替代本次结果。", reviewed)
     result.update(audit=audit, passed=audit["passed"], history=[history_entry(1, audit)],
                   review_context={"profile": profile, "preferences": preferences, "recent_trips": recent_trips})
     return result
@@ -617,6 +617,31 @@ def _merge_style_blocks(original: list[dict], replacement: list[dict], style: st
         else:
             merged.append(block)
     return merged
+
+
+@router.post("/review")
+def review_plan(payload: PlanRequest) -> dict:
+    """Retry the same snapshot without generating, changing or finalizing a plan."""
+    plan = copy.deepcopy(payload.plan or {})
+    if type(plan.get("revision")) is not int or plan["revision"] < 1 or payload.modify is not None:
+        raise HTTPException(status_code=422, detail="请提供当前有效版本的完整行程；审核不接受修改指令")
+    _validated_blocks(plan.get("blocks"), allow_empty=True)
+    # A retry uses the stored plan's dates and constraints, not a hidden edit.
+    for key in ("destination", "start_date", "end_date"):
+        if getattr(payload, key) not in (None, plan.get(key)):
+            raise HTTPException(status_code=422, detail="行程信息已变化，请通过修改行程重新审核")
+    stored_basic = plan.get("basic") if plan.get("basic") is not None else {}
+    if not isinstance(stored_basic, dict) or (payload.basic is not None and payload.basic != stored_basic):
+        raise HTTPException(status_code=422, detail="旅行需求已变化，请通过修改行程重新审核")
+    _request_context(PlanRequest(destination=plan.get("destination"), start_date=plan.get("start_date"),
+                                 end_date=plan.get("end_date"), basic=stored_basic))
+    context = plan.get("review_context") or {}
+    if not isinstance(context, dict):
+        context = {}
+    return _review_modified_plan(plan, payload.search or {}, stored_basic,
+        payload.profile if payload.profile is not None else context.get("profile"),
+        payload.preferences if payload.preferences is not None else context.get("preferences"),
+        payload.recent_trips if payload.recent_trips is not None else context.get("recent_trips"))
 
 
 @router.post("")

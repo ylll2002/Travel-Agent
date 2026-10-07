@@ -1,7 +1,7 @@
 # ValidateAgent - 旅行方案审核 Agent
 
 审核 PlanAgent 方案的预算、交通、偏好、天气、时间和完整性，并提供定位明确的修改建议。
-目前使用模型审核；规则检查将在下一阶段补充。
+目前提供模型审核和独立规则检查两种入口。规则与模型的整合将在下一阶段完成。
 
 ## 安装
 
@@ -24,6 +24,22 @@ cat validate_input.json | .venv/bin/python validate.py
 输入字段：`plan`、`profile`、`preferences`、`recent_trips`、`search`、`basic`。
 其中 `basic` 保存用户明确需求（预算、人数、日期等），`search` 保存来源信息。
 CLI 和内部函数均使用同一审核协议，见 [审核协议](../docs/VALIDATE_AGENT.md)。
+
+## 无模型的规则检查
+
+在仓库根目录运行，无需模型 Key、网络或第三方 Python 库：
+
+```bash
+python3 ValidateAgent/rules.py < ValidateAgent/examples/rules_input.json
+```
+
+示例是合成数据，会发现超预算、交通间隔不足和地点未出现在候选列表中的问题。
+也可将真实方案、完整搜索快照和明确需求保存为同结构 JSON，再输入该入口。
+输入为 `{"plan": {...}, "search": {...}, "basic": {...}}`。
+
+规则检查是第二阶段新增的独立入口，网站仍使用原模型审核流程；下一阶段再整合，
+避免当前先改变主流程的审核判定和模型调用次数。
+详情见 [审核协议和规则](../docs/VALIDATE_AGENT.md)。
 
 ## 独立审核循环
 

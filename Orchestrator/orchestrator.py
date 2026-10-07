@@ -191,13 +191,17 @@ def plan_node(state: State) -> dict:
     basic = state.get("basic")
     if not isinstance(basic, dict):
         basic = (state.get("plan") or {}).get("basic") or {}
+    # 初始的全城美食只用于前端候选展示，规划时不传入（规划用景点锚点周边的美食）。
+    search_for_plan = dict(state.get("search") or {})
+    search_for_plan.pop("food", None)
+    search_for_plan.pop("food_preview", None)
     payload = {
         "profile": state.get("profile"),
         "preferences": state.get("preferences"),
         "recent_trips": state.get("recent_trips"),
         "recent_trip_summary": state.get("recent_trip_summary"),
         "skip_trip_summary": state.get("skip_trip_summary"),
-        "search": state.get("search"),
+        "search": search_for_plan,
         "basic": basic,
     }
     if state.get("feedback"):
@@ -211,6 +215,10 @@ def plan_node(state: State) -> dict:
         basic = deepcopy(result["basic"])
     result.update(revision=next_plan_revision(state.get("plan")), basic=deepcopy(basic))
     search = merge_plan_sources(state.get("search"), result)
+    # Keep city-wide UI candidates while the audit uses the actual anchor sources.
+    original_search = state.get("search") or {}
+    if "food_preview" not in search and isinstance(original_search.get("food"), list):
+        search["food_preview"] = deepcopy(original_search["food"])
     return {"plan": result, "search": search, "iteration": state.get("iteration", 0) + 1,
             "audit": None, "feedback": None, "basic": basic}
 

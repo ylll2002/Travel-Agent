@@ -47,12 +47,12 @@ class MemoryServiceTests(unittest.TestCase):
             sig("avoid", target="纯购物街区"),
         ] * 3  # 重复三次达到 min_count=3
         prefs = _learn(signals, min_count=3)
-        self.assertEqual(prefs["pace"], "轻松")
+        self.assertNotIn("pace", prefs)
         self.assertEqual(prefs["transport"], ["打车优先", "地铁优先"])
         self.assertEqual(prefs["food"]["cuisines"], ["杭帮菜"])
         self.assertIn("太辣", prefs["food"]["avoid"])
         self.assertTrue(any(x in prefs["hotel"]["must"] for x in ("含早", "早餐")))
-        self.assertIn("西湖", prefs["liked"])
+        self.assertNotIn("liked", prefs)
         self.assertIn("纯购物街区", prefs["avoided"])
 
     def test_learn_respects_min_count(self):

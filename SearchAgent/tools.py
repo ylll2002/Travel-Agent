@@ -1369,8 +1369,8 @@ def run_search(input_data: dict) -> dict:
     """输入 {destination, start_date, end_date?, origin?, basic?, food_keyword?}，
     并行搜索天气、酒店、景点、活动和交通，返回结构化 JSON。
 
-    basic 可含 total_budget（总预算）、travelers（出行人数）、purposes（旅行目的），
-    餐厅在景点行程确定后通过 run_food_search 查询；此阶段不做全城推荐。
+    basic 可含 total_budget（总预算）、travelers（出行人数）、purposes（旅行目的）。
+    此阶段也做一次全城餐厅搜索（仅用于前端候选展示）；规划仍用景点确定后的周边搜索。
     """
     destination = (input_data.get("destination") or "").strip()
     if not destination:
@@ -1419,6 +1419,7 @@ def run_search(input_data: dict) -> dict:
         "poi": lambda: _fetch_poi_distributed(destination, target=50, travel_styles=travel_styles),
         "events": lambda: _fetch_events(destination, start, end),
         "social_food": lambda: _fetch_social_food(destination),
+        "food": lambda: _fetch_food(destination, keyword=food_keyword, max_price=max_price, max_results=30),
     }
     if origin and origin != destination:
         tasks["flights"] = lambda: _fetch_round_trip(_fetch_flights, origin, destination, start, end)
@@ -1430,7 +1431,6 @@ def run_search(input_data: dict) -> dict:
             result[result_key] = value
 
     # 景点日程确定后，由 PlanAgent 用实际餐点位置调用 --food-nearby。
-    result["food"] = []
     result["food_search_pending"] = True
 
     # 飞猪数据源偶发抖动会整批返回空，重试一次并避免把空结果缓存 1 小时。

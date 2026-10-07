@@ -25,10 +25,12 @@ class AuditSourceTests(unittest.TestCase):
              patch("plan._search_hotels", return_value=[extra]), \
              patch("plan._dedupe_poi_names", side_effect=lambda result, sources: result), \
              patch("plan._reorder_by_proximity", side_effect=lambda result, city: result), \
-             patch("plan.refresh_food_for_plan", side_effect=lambda result, *args: result), \
+             patch("plan.refresh_food_for_plan", side_effect=lambda result, *args, **kwargs: result) as refresh, \
              patch("plan._backfill_links", side_effect=lambda result, sources: result), \
              patch("plan.geocode", side_effect=AssertionError("No network")):
-            result = plan.build_plan(search, basic={"budget_tiers": ["经济"]})
+            result = plan.build_plan(search, basic={"budget_tiers": ["经济"]}, profile={"age_group": "60+"})
+        self.assertEqual(refresh.call_args.kwargs["profile"], {"age_group": "60+"})
+        self.assertEqual(result["suggestions"]["hotels"][0]["name"], extra["name"])
         self.assertEqual(result["source_updates"], {"hotels": [extra]})
         self.assertEqual(result["plans"][0]["itinerary"][0]["hotel"], extra["name"])
 

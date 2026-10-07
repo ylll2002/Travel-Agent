@@ -76,6 +76,28 @@ class AuditContextTests(unittest.TestCase):
         self.assertEqual(result["plan"]["revision"], 5)
         self.assertIn("audit", previous)
 
+    def test_city_food_preview_is_kept_but_planner_and_review_use_correct_sources(self):
+        city = {"name": "全城展示餐厅", "url": "https://example.test/city"}
+        actual = {"name": "景点附近餐厅", "url": "https://example.test/anchor"}
+        original_search = {"food": [city], "hotels": []}
+        generated = {"blocks": [], "food": [actual], "food_by_anchor": [{"restaurants": [actual]}]}
+        with patch.object(flow, "_call", return_value=generated) as planner:
+            result = flow.plan_node({"search": original_search})
+        self.assertNotIn("food", planner.call_args.args[2]["search"])
+        self.assertNotIn("food_preview", planner.call_args.args[2]["search"])
+        self.assertEqual(result["search"]["food"], [actual])
+        self.assertEqual(result["search"]["food_preview"], [city])
+        self.assertEqual(original_search["food"], [city])
+        with patch.object(flow, "_call", return_value={"passed": True, "issues": []}) as reviewer:
+            flow.validate_node(result)
+        self.assertEqual(reviewer.call_args.args[2]["search"]["food"], [actual])
+        self.assertEqual(_search_for_validate(result["search"])["food"], [actual])
+        self.assertNotIn("food_preview", _search_for_validate(result["search"]))
+        with patch.object(flow, "_call", return_value=generated) as planner:
+            second = flow.plan_node(result)
+        self.assertEqual(second["search"]["food_preview"], [city])
+        self.assertNotIn("food_preview", planner.call_args.args[2]["search"])
+
     def test_global_edit_keeps_the_resolved_new_budget_for_review(self):
         changed = {"blocks": [], "basic": {"total_budget": 200}}
         with patch.object(flow, "_call", return_value=changed):

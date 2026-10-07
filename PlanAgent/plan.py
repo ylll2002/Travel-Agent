@@ -12,12 +12,14 @@
 输出：旅行计划 JSON（含逐日 itinerary）
 """
 
+import hashlib
 import json
 import math
 import os
 import re
 import subprocess
 import sys
+from collections import OrderedDict
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
@@ -388,19 +390,150 @@ def _user_match_signals(profile, preferences, basic) -> tuple[list[str], list[st
     return _dedupe_keywords(positive), _dedupe_keywords(negative)
 
 
-def _score_poi_match(poi: dict, profile, preferences, basic) -> int:
-    """给单个景点打分（0-100），反映其与画像/偏好/本次旅行信息的匹配度。"""
-    positive, negative = _user_match_signals(profile, preferences, basic)
-    if not positive and not negative:
-        return 50
-    text = " ".join(
+def _poi_match_text(poi: dict) -> str:
+    """景点用于匹配/embedding 的文本。"""
+    return " ".join(
         str(poi.get(key) or "")
         for key in ("name", "category", "description", "scale", "duration", "district")
     )
+
+
+def _user_match_text(profile, preferences, basic) -> str:
+    """用户画像/偏好/本次需求拼成的文本，用于 embedding。"""
+    parts: list[str] = []
+    for source in (
+        (profile or {}).get("travel_style"),
+        (basic or {}).get("travel_style"),
+        (basic or {}).get("purposes"),
+    ):
+        items = source or []
+        if isinstance(items, str):
+            items = [items]
+        parts.extend(str(x).strip() for x in items if str(x).strip())
+    liked = (preferences or {}).get("liked") or []
+    if isinstance(liked, str):
+        liked = [liked]
+    parts.extend(str(x).strip() for x in liked if str(x).strip())
+    return " ".join(parts)
+
+
+_embedding_client = None
+
+
+def _embedding_client_instance():
+    """懒加载 embedding 客户端；未配置时返回 None。"""
+    global _embedding_client
+    if _embedding_client is None:
+        base_url = os.getenv("EMBEDDING_BASE_URL") or ""
+        api_key = os.getenv("EMBEDDING_API_KEY") or os.getenv("OPENAI_API_KEY") or ""
+        if not base_url or not api_key:
+            return None
+        _embedding_client = OpenAI(api_key=api_key, base_url=base_url)
+    return _embedding_client
+
+
+def _embed_texts(client, texts: list[str]) -> list[list[float]] | None:
+    """批量把文本转成向量；失败返回 None。"""
+    if not texts:
+        return []
+    model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+    try:
+        resp = client.embeddings.create(model=model, input=texts)
+        return [item.embedding for item in resp.data]
+    except Exception:
+        return None
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def _score_poi_match(poi: dict, profile, preferences, basic) -> int:
+    """给单个景点打关键词匹配分（0-100），反映其与画像/偏好/本次旅行信息的匹配度。"""
+    positive, negative = _user_match_signals(profile, preferences, basic)
+    if not positive and not negative:
+        return 50
+    text = _poi_match_text(poi)
     pos_hits = sum(1 for kw in positive if kw in text)
     neg_hits = sum(1 for kw in negative if kw in text)
     score = 50 + 12 * pos_hits - 18 * neg_hits
     return max(0, min(100, score))
+
+
+EMBEDDING_CACHE_PATH = BASE_DIR / "poi_embedding_cache.json"
+EMBEDDING_CACHE_MAX = 2000  # 缓存向量条数上限，超出按 LRU 淘汰最旧的
+
+
+def _load_embedding_cache() -> OrderedDict:
+    try:
+        data = json.loads(EMBEDDING_CACHE_PATH.read_text(encoding="utf-8"))
+        return OrderedDict(data) if isinstance(data, dict) else OrderedDict()
+    except (OSError, json.JSONDecodeError):
+        return OrderedDict()
+
+
+def _save_embedding_cache(cache: OrderedDict) -> None:
+    # 容量上限：超出则从最旧（最久未用）开始淘汰
+    while len(cache) > EMBEDDING_CACHE_MAX:
+        cache.popitem(last=False)
+    try:
+        EMBEDDING_CACHE_PATH.write_text(
+            json.dumps(dict(cache), ensure_ascii=False), encoding="utf-8"
+        )
+    except OSError:
+        pass
+
+
+def _embedding_cache_key(poi: dict, model: str) -> str:
+    """键 = 模型名 + 文本 hash，模型切换或文本变化都会产生新键。"""
+    text = _poi_match_text(poi)
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    return f"{model}::{digest}"
+
+
+def _apply_match_scores(pois: list[dict], profile, preferences, basic) -> None:
+    """给每个景点算匹配度：关键词分 + 可选的向量相似度分（0.4 关键词 + 0.6 向量）。"""
+    for poi in pois:
+        poi["match_score"] = _score_poi_match(poi, profile, preferences, basic)
+    client = _embedding_client_instance()
+    if client is None:
+        return
+    user_text = _user_match_text(profile, preferences, basic)
+    if not user_text.strip():
+        return
+    model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+    cache = _load_embedding_cache()
+    poi_vecs: list[list[float] | None] = [None] * len(pois)
+    to_embed: list[tuple[int, str, str]] = []
+    for index, poi in enumerate(pois):
+        key = _embedding_cache_key(poi, model)
+        if key in cache and isinstance(cache[key], list):
+            poi_vecs[index] = cache[key]
+            cache.move_to_end(key)  # 标记最近使用
+        else:
+            to_embed.append((index, key, _poi_match_text(poi)))
+    texts = [user_text] + [text for _, _, text in to_embed]
+    vectors = _embed_texts(client, texts)
+    if not vectors or len(vectors) != len(texts):
+        return
+    user_vec = vectors[0]
+    for offset, (index, key, _) in enumerate(to_embed):
+        vector = vectors[offset + 1]
+        poi_vecs[index] = vector
+        cache[key] = vector  # 新条目放到末尾（最近使用）
+    if to_embed:
+        _save_embedding_cache(cache)
+    for index, poi in enumerate(pois):
+        vector = poi_vecs[index]
+        if vector is None:
+            continue
+        similarity = _cosine(user_vec, vector)
+        vec_score = (similarity + 1) / 2 * 100
+        keyword_score = int(poi.get("match_score") or 0)
+        poi["match_score"] = round(0.4 * keyword_score + 0.6 * vec_score)
 
 
 def _filter_far_pois(search: dict, destination: str, max_km: float = 60.0) -> dict:
@@ -1139,6 +1272,8 @@ def _enforce_day_schedule(day_plan: dict, assignment: dict, date_: str,
             previous_coord = coord
         if poi.get("match_score") is not None:
             item["match_score"] = int(poi["match_score"])
+        if poi.get("category_label"):
+            item["category_label"] = poi["category_label"]
         item["link"] = poi.get("url") or item.get("link") or ""
         schedule.append(item)
         cursor = proposed_start + duration
@@ -1719,12 +1854,132 @@ def _meal_budget_for_plan(plan: dict, basic: dict | None) -> float | None:
     return round(total * 0.25 / travelers / days / 3, 2)
 
 
+def _age_lower(age_group: str | None) -> int | None:
+    """从「18-25」「60+」这类年龄段里取出下限年龄。"""
+    m = re.search(r"(\d+)", str(age_group or ""))
+    return int(m.group(1)) if m else None
+
+
+def _evening_keywords(age_group: str | None) -> list[str]:
+    """按年龄段返回晚间活动的偏好关键词（顺序即优先级）。"""
+    lower = _age_lower(age_group)
+    if lower is not None:
+        if lower < 36:
+            # 年轻：酒吧、夜市等夜生活优先
+            return ["酒吧", "夜市", "步行街", "外滩", "滨江", "广场", "公园", "老街"]
+        if lower < 60:
+            # 中年：休闲散步，避开酒吧
+            return ["广场", "步行街", "公园", "老街", "滨江", "古街", "休闲"]
+        # 老年：安静低强度
+        return ["公园", "广场", "滨江", "绿道", "老街", "古街"]
+    # 无年龄信息：通用 + 酒吧
+    return ["酒吧", "广场", "步行街", "公园", "老街", "夜市", "外滩", "滨江", "古街", "休闲", "绿道"]
+
+
+def _pick_evening_spot(
+    search_result: dict,
+    anchor: list[float],
+    used_names: set[str],
+    keywords: list[str],
+) -> dict | None:
+    """挑一个锚点 5km 内的晚间休闲景点，按关键词优先级 + 距离排序。"""
+    candidates: list[tuple[int, float, dict]] = []
+    for poi in search_result.get("poi") or []:
+        if not isinstance(poi, dict):
+            continue
+        name = str(poi.get("name") or "").strip()
+        if not name or name in used_names:
+            continue
+        priority = next((idx for idx, key in enumerate(keywords) if key in name), None)
+        if priority is None:
+            continue
+        lng, lat = poi.get("longitude"), poi.get("latitude")
+        if not _valid_food_coord([lng, lat]):
+            continue
+        km = _km(f"{anchor[0]},{anchor[1]}", f"{lng},{lat}")
+        if km <= 5.0:
+            candidates.append((priority, km, poi))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    return candidates[0][2]
+
+
+def _add_evening_activity(
+    day: dict,
+    search_result: dict,
+    hotel_map: dict[str, dict],
+    profile: dict | None = None,
+) -> dict:
+    """晚上无安排时，在酒店附近补一个休闲活动（广场/步行街/公园等）。"""
+    schedule = list(day.get("schedule") or [])
+    if any((s.get("type") or "") == "活动" for s in schedule):
+        return day
+    hotel_name = str(day.get("hotel") or "").strip()
+    if not hotel_name or any(word in hotel_name for word in ("无住宿", "返程", "不住宿", "无需住宿")):
+        return day
+    # 找晚餐结束时间
+    dinner_end = None
+    for s in schedule:
+        if (s.get("type") or "") in ("美食", "餐饮") and s.get("meal") == "晚餐":
+            rng = _schedule_range(s)
+            if rng:
+                dinner_end = rng[1]
+            break
+    window = day.get("activity_window") or {}
+    try:
+        end_min = int(window.get("end_min") or 20 * 60)
+    except (TypeError, ValueError):
+        end_min = 20 * 60
+    start = max((dinner_end or 17 * 60) + 15, 18 * 60)
+    if start + 60 > end_min:
+        return day
+    # 锚点：酒店坐标；找不到就取最后一个景点坐标
+    destination = str(search_result.get("destination") or "")
+    hotel = hotel_map.get(hotel_name)
+    anchor = _hotel_coord(hotel, destination) if hotel else None
+    if not _valid_food_coord(anchor):
+        for s in reversed(schedule):
+            coord = [s.get("lng", s.get("longitude")), s.get("lat", s.get("latitude"))]
+            if _valid_food_coord(coord):
+                anchor = [float(coord[0]), float(coord[1])]
+                break
+    if not _valid_food_coord(anchor):
+        return day
+    used_names = {str(s.get("name") or "").strip() for s in schedule}
+    age_group = (profile or {}).get("age_group")
+    keywords = _evening_keywords(age_group)
+    spot = _pick_evening_spot(search_result, anchor, used_names, keywords)
+    if not spot:
+        return day
+    finish = min(start + 90, end_min)
+    schedule.append(
+        {
+            "time": f"{_clock(start)}-{_clock(finish)}",
+            "type": "活动",
+            "name": spot.get("name") or "",
+            "note": "晚餐后酒店附近散步，轻松收尾",
+            "link": spot.get("url") or "",
+        }
+    )
+    schedule.sort(
+        key=lambda s: (
+            _to_minutes(s.get("time") or "")
+            if _to_minutes(s.get("time") or "") is not None
+            else 1440
+        )
+    )
+    day["schedule"] = schedule
+    return day
+
+
 def refresh_food_for_plan(
     plan: dict,
     search_result: dict | None = None,
     basic: dict | None = None,
     force: bool = True,
     targets: list[dict] | None = None,
+    profile: dict | None = None,
 ) -> dict:
     """景点/时间修改后重新搜索餐饮；保留 user_added/user_selected/locked 餐厅。
 
@@ -1863,6 +2118,14 @@ def refresh_food_for_plan(
         }
         _add_food_to_day(day, [], "", None, poi_map, used_by_style.setdefault(style, set()), budget_tier,
                          food_by_meal=by_meal, meal_budget=meal_budget)
+    # 晚上无安排时，在酒店附近补一个休闲活动（广场/步行街/公园等）。
+    hotel_map = {
+        str(h.get("name") or "").strip(): h
+        for h in (search_result.get("hotels") or [])
+        if isinstance(h, dict) and h.get("name")
+    }
+    for _, day in days_with_style:
+        _add_evening_activity(day, search_result, hotel_map, profile)
     if target_keys:
         food_by_anchor = [
             entry for entry in (plan.get("food_by_anchor") or [])
@@ -2139,6 +2402,111 @@ def _ensure_hotels(plan: dict, search_result: dict) -> dict:
     return plan
 
 
+def _build_suggestions(plan: dict, search_result: dict, basic: dict | None) -> dict:
+    """计划完成后生成推荐卡片：封面图 + 4 组未选中的候选。"""
+    selected: set[str] = set()
+    for style in plan.get("plans") or []:
+        for it in style.get("itinerary") or []:
+            for item in it.get("schedule") or []:
+                name = str(item.get("name") or "").strip()
+                if name:
+                    selected.add(name)
+
+    pois = [
+        p for p in (search_result.get("poi") or [])
+        if isinstance(p, dict) and p.get("name")
+    ]
+    hotels = [
+        h for h in (search_result.get("hotels") or [])
+        if isinstance(h, dict) and h.get("name")
+    ]
+    food = [
+        f for f in (search_result.get("food") or [])
+        if isinstance(f, dict) and f.get("name")
+    ]
+
+    def rank_key(p: dict) -> tuple:
+        n = _rank_score(p.get("rank"))
+        return (n == 0, n or 10**9)
+
+    ranked = sorted(pois, key=rank_key)
+    cover_image = next(
+        (str(p.get("image") or "").strip() for p in ranked if p.get("image")),
+        "",
+    )
+    unselected = [p for p in pois if p.get("name") not in selected]
+
+    def poi_card(p: dict) -> dict:
+        match = int(p.get("match_score") or 0)
+        return {
+            "name": p.get("name") or "",
+            "image": p.get("image") or "",
+            "subtitle": f"榜单 {p.get('rank') or '—'} · 匹配度 {match}",
+            "link": p.get("url") or "",
+        }
+
+    spots_rank = [poi_card(p) for p in sorted(unselected, key=rank_key)[:3]]
+    spots_match = [
+        poi_card(p)
+        for p in sorted(unselected, key=lambda p: -(int(p.get("match_score") or 0)))[:3]
+    ]
+
+    unselected_food = [f for f in food if f.get("name") not in selected]
+
+    def food_rating(f: dict) -> float:
+        try:
+            return float(f.get("rating") or 0)
+        except (ValueError, TypeError):
+            return 0.0
+
+    def food_card(f: dict) -> dict:
+        rating = f.get("rating")
+        price = f.get("price_per_person")
+        parts = [f"评分 {rating}" if rating is not None else "暂无评分"]
+        if price is not None:
+            parts.append(f"人均 ¥{price}")
+        return {
+            "name": f.get("name") or "",
+            "image": "",
+            "subtitle": " · ".join(parts),
+            "link": f.get("poi_detail_url") or f.get("map_url") or f.get("url") or "",
+        }
+
+    restaurants = [
+        food_card(f)
+        for f in sorted(unselected_food, key=lambda f: -food_rating(f))[:3]
+    ]
+
+    budget_tiers = (basic or {}).get("budget_tiers") or []
+    budget_tier = budget_tiers[0] if isinstance(budget_tiers, list) and budget_tiers else None
+    budget_hotels = [h for h in hotels if _hotel_in_budget(h, budget_tier)]
+    budget_hotels.sort(
+        key=lambda h: (
+            _hotel_price(h.get("price")) is None,
+            _hotel_price(h.get("price")) or 0,
+        )
+    )
+
+    def hotel_card(h: dict) -> dict:
+        star = h.get("star") or ""
+        price = _hotel_price(h.get("price"))
+        parts = [p for p in (star, f"¥{price:g}" if price is not None else None) if p]
+        return {
+            "name": h.get("name") or "",
+            "image": h.get("image") or "",
+            "subtitle": " · ".join(parts),
+            "link": h.get("url") or "",
+        }
+
+    return {
+        "cover_image": cover_image,
+        "spots_rank": spots_rank,
+        "spots_match": spots_match,
+        "restaurants": restaurants,
+        "hotels": [hotel_card(h) for h in budget_hotels[:3]],
+    }
+
+
 def build_plan(
     search_result: dict,
     profile: dict | None = None,
@@ -2162,9 +2530,12 @@ def build_plan(
     transport = _select_transport(search_result, basic)
 
     # 为每个景点按画像/偏好/本次旅行信息计算匹配度，供模型和最终输出使用。
-    for poi in (search_result.get("poi") or []):
-        if isinstance(poi, dict):
-            poi["match_score"] = _score_poi_match(poi, profile, preferences, basic)
+    _apply_match_scores(
+        [p for p in (search_result.get("poi") or []) if isinstance(p, dict)],
+        profile,
+        preferences,
+        basic,
+    )
 
     search_result = _filter_far_pois(search_result, destination)
 
@@ -2275,6 +2646,13 @@ def build_plan(
     result = meta
     result["selected_transport"] = transport
     warnings = []
+    # 天气数据异常（常见于查询日期过远，超出预报范围）
+    weather = search_result.get("weather")
+    if isinstance(weather, dict) and weather.get("error"):
+        warnings.append("天气数据暂不可用（可能查询日期过远，超出预报范围）。")
+    # 酒店为空（常见于日期过远或数据源暂无库存）
+    if not search_result.get("hotels"):
+        warnings.append("未找到可预订酒店（可能日期过远或数据源暂无数据），酒店安排待确认。")
     origin = (basic or {}).get("origin") or search_result.get("origin")
     if origin and origin != destination:
         for key, label, target_day in (("outbound", "去程", 1), ("inbound", "返程", days)):
@@ -2299,9 +2677,10 @@ def build_plan(
             coord = poi_map.get(item.get("name"))
             if item.get("type") == "景点" and _valid_food_coord(coord):
                 item.update({"lng": coord[0], "lat": coord[1]})
-    result = refresh_food_for_plan(result, search_result, basic)
+    result = refresh_food_for_plan(result, search_result, basic, profile=profile)
     if supplemental_hotels:
         result["source_updates"] = {"hotels": supplemental_hotels}
+    result["suggestions"] = _build_suggestions(result, search_result, basic)
     return _backfill_links(result, search_result)
 
 

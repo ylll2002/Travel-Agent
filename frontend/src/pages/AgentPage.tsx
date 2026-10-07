@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
+import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { api } from '../api/client';
 import { TripMap } from '../components/TripMap';
 import type { RouteBlock, RouteLeg } from '../components/TripMap';
@@ -906,278 +906,6 @@ export function AgentPage() {
   }
 
 
-  function loadMockData() {
-    const styles = ['轻享周末', '深度漫游'];
-    const summaries: Record<string, string> = {
-      轻享周末: '杭州 2 日轻松游，西湖、灵隐寺与河坊街，节奏舒缓、适合周末放松。',
-      深度漫游: '杭州 2 日文化深度游，博物馆、古迹与老街区，安排更紧凑。',
-    };
-    const blocks: RouteBlock[] = [
-      {
-        id: 'mock-a-1',
-        plan_style: '轻享周末',
-        day: 1,
-        date: '2026-10-02',
-        type: '景点',
-        time: '09:00-11:00',
-        name: '西湖风景名胜区',
-        note: '地铁1号线到龙翔桥，步行至断桥',
-        lng: 120.1475,
-        lat: 30.2444,
-      },
-      {
-        id: 'mock-a-2',
-        plan_style: '轻享周末',
-        day: 1,
-        date: '2026-10-02',
-        type: '美食',
-        time: '12:00-13:00',
-        name: '楼外楼（孤山路店）',
-        note: '西湖醋鱼、龙井虾仁',
-        lng: 120.1324,
-        lat: 30.2506,
-      },
-      {
-        id: 'mock-a-3',
-        plan_style: '轻享周末',
-        day: 2,
-        date: '2026-10-03',
-        type: '景点',
-        time: '10:00-12:00',
-        name: '灵隐寺',
-        note: '打车约 25 分钟',
-        lng: 120.0996,
-        lat: 30.2378,
-      },
-      {
-        id: 'mock-a-4',
-        plan_style: '轻享周末',
-        day: 2,
-        date: '2026-10-03',
-        type: '酒店',
-        time: '14:00',
-        name: '杭州西子湖四季酒店',
-        note: '湖景房，含双早',
-        lng: 120.1512,
-        lat: 30.2312,
-      },
-      {
-        id: 'mock-b-1',
-        plan_style: '深度漫游',
-        day: 1,
-        date: '2026-10-02',
-        type: '景点',
-        time: '09:30-11:30',
-        name: '浙江省博物馆',
-        note: '地铁2号线到武林门',
-        lng: 120.1537,
-        lat: 30.2666,
-      },
-      {
-        id: 'mock-b-2',
-        plan_style: '深度漫游',
-        day: 1,
-        date: '2026-10-02',
-        type: '美食',
-        time: '12:30-13:30',
-        name: '知味观（仁和路店）',
-        note: '小笼包、猫耳朵',
-        lng: 120.1661,
-        lat: 30.2461,
-      },
-      {
-        id: 'mock-b-3',
-        plan_style: '深度漫游',
-        day: 2,
-        date: '2026-10-03',
-        type: '景点',
-        time: '10:00-12:00',
-        name: '河坊街与南宋御街',
-        note: '地铁1号线到定安路',
-        lng: 120.1706,
-        lat: 30.2417,
-      },
-      {
-        id: 'mock-b-4',
-        plan_style: '深度漫游',
-        day: 2,
-        date: '2026-10-03',
-        type: '酒店',
-        time: '14:00',
-        name: '杭州西湖国宾馆',
-        note: '园林式酒店，安静',
-        lng: 120.1213,
-        lat: 30.2268,
-      },
-    ];
-    const legs: RouteLeg[] = [
-      {
-        plan_style: '轻享周末',
-        day: 1,
-        from: 'mock-a-1',
-        to: 'mock-a-2',
-        mode: 'walk',
-        distance_m: 1300,
-        duration_s: 1080,
-        polyline: [
-          [120.1475, 30.2444],
-          [120.1402, 30.2476],
-          [120.1324, 30.2506],
-        ],
-      },
-      {
-        plan_style: '轻享周末',
-        day: 2,
-        from: 'mock-a-3',
-        to: 'mock-a-4',
-        mode: 'drive',
-        distance_m: 6200,
-        duration_s: 1380,
-        polyline: [
-          [120.0996, 30.2378],
-          [120.1234, 30.2312],
-          [120.1512, 30.2312],
-        ],
-      },
-      {
-        plan_style: '深度漫游',
-        day: 1,
-        from: 'mock-b-1',
-        to: 'mock-b-2',
-        mode: 'transit',
-        distance_m: 2400,
-        duration_s: 1500,
-        lines: ['地铁1号线'],
-        polyline: [
-          [120.1537, 30.2666],
-          [120.1598, 30.2563],
-          [120.1661, 30.2461],
-        ],
-      },
-    ];
-
-    setRoutePlan({
-      destination: '杭州',
-      start_date: '2026-10-02',
-      end_date: '2026-10-03',
-      styles,
-      summaries,
-      blocks,
-      legs,
-    });
-    setWeatherData({
-      days: [
-        {
-          date: '2026-10-02',
-          weather: '多云',
-          temp_min: 20,
-          temp_max: 27,
-          humidity: 68,
-        },
-        {
-          date: '2026-10-03',
-          weather: '晴',
-          temp_min: 21,
-          temp_max: 29,
-          humidity: 62,
-        },
-      ],
-    });
-    setOptions([
-      {
-        id: 'mock-flight-1',
-        type: 'flight',
-        mode: 'flight',
-        title: 'MU5211',
-        subtitle: '上海虹桥 → 杭州',
-        from: '上海虹桥',
-        to: '杭州',
-        departTime: '08:30',
-        arriveTime: '09:20',
-        carrier: '东方航空',
-        code: 'MU5211',
-        duration: '50分钟',
-        price: 420,
-        scheduleAt: '08:30',
-        scheduleLabel: '08:30',
-        location: '杭州',
-        tags: ['经济舱'],
-        description: '东方航空 MU5211，上海虹桥 → 杭州。',
-      },
-      {
-        id: 'mock-hotel-1',
-        type: 'hotel',
-        title: '杭州西子湖四季酒店',
-        subtitle: '西湖区',
-        district: '西湖区',
-        checkIn: '2026-10-02',
-        checkOut: '2026-10-03',
-        roomType: '豪华湖景房',
-        rating: 4.8,
-        nightlyPrice: 1280,
-        totalPrice: 1280,
-        scheduleAt: '',
-        scheduleLabel: '',
-        location: '西湖区',
-        tags: ['五星'],
-        description: '杭州西子湖四季酒店，五星，西湖区。',
-      },
-      {
-        id: 'mock-spot-1',
-        type: 'spot',
-        title: '西湖风景名胜区',
-        subtitle: '自然风光',
-        area: '西湖区',
-        openHours: '全天',
-        recommendedDuration: '3小时',
-        ticketPrice: 0,
-        scheduleAt: '',
-        scheduleLabel: '',
-        location: '西湖区',
-        tags: ['5A'],
-        description: '杭州经典自然风光，免费开放。',
-      },
-      {
-        id: 'mock-event-1',
-        type: 'event',
-        title: '西湖音乐节',
-        subtitle: '现场演出',
-        price: 188,
-        scheduleAt: '2026-10-02',
-        scheduleLabel: '10月2日',
-        location: '西湖',
-        tags: ['音乐节'],
-        description: '西湖音乐节，现场演出。',
-      },
-      {
-        id: 'mock-food-1',
-        type: 'food',
-        title: '楼外楼（孤山路店）',
-        subtitle: '杭帮菜',
-        cuisine: '杭帮菜',
-        rating: 4.6,
-        pricePerPerson: 120,
-        businessArea: '西湖',
-        address: '杭州市西湖区孤山路30号',
-        detailUrl: '',
-        mapUrl: '',
-        scheduleAt: '',
-        scheduleLabel: '',
-        location: '西湖',
-        tags: ['杭帮菜', '4.6分'],
-        description: '杭州市西湖区孤山路30号',
-      },
-    ]);
-    setActiveStyle(styles[0] ?? '');
-    setActiveDay('all');
-    setExpandedStyle(null);
-    setConfirmedStyle(null);
-    setPlanRating(null);
-    setPlanFeedback('');
-    setSaveState('idle');
-    setSelectedBlocks(new Set());
-    addAssistantMessage('已加载前端测试数据，可在右侧「方案」中查看两个示例计划。');
-  }
 
   function handleSend() {
     const content = draft.trim();
@@ -1533,45 +1261,46 @@ export function AgentPage() {
                 <div className="ta-message-bubble">{message.content}</div>
               </div>
             ))}
-          </div>
-
-          {routePlan?.suggestions && (
-            <div className="ta-suggestion-panel">
-              {[
-                { title: '排行榜推荐景点', cards: routePlan.suggestions.spots_rank },
-                { title: '高匹配景点', cards: routePlan.suggestions.spots_match },
-                { title: '高分餐厅', cards: routePlan.suggestions.restaurants },
-                { title: '预算内酒店', cards: routePlan.suggestions.hotels },
-              ].filter((group) => group.cards.length > 0).map((group) => (
-                <div key={group.title} className="ta-suggestion-group">
-                  <div className="ta-suggestion-group-title">{group.title}</div>
-                  <div className="ta-suggestion-scroll">
-                    {group.cards.map((card) => (
-                      <a
-                        key={card.name}
-                        className="ta-suggestion-card"
-                        href={card.link || undefined}
-                        target={card.link ? '_blank' : undefined}
-                        rel="noreferrer"
-                      >
-                        {card.image && (
-                          <img
-                            className="ta-suggestion-card-img"
-                            src={card.image}
-                            alt={card.name}
-                          />
-                        )}
-                        <div className="ta-suggestion-card-body">
-                          <strong>{card.name}</strong>
-                          <span>{card.subtitle}</span>
-                        </div>
-                      </a>
-                    ))}
+            {routePlan?.suggestions && (() => {
+              const cards = [
+                ...routePlan.suggestions.spots_rank.map((card) => ({ ...card, kind: '景点' })),
+                ...routePlan.suggestions.spots_match.map((card) => ({ ...card, kind: '景点' })),
+                ...routePlan.suggestions.restaurants.map((card) => ({ ...card, kind: '餐厅' })),
+                ...routePlan.suggestions.hotels.map((card) => ({ ...card, kind: '酒店' })),
+              ];
+              return cards.length > 0 ? (
+                <div className="ta-message assistant">
+                  <span className="ta-message-avatar">TR</span>
+                  <div className="ta-message-bubble ta-suggestion-bubble">
+                    <div className="ta-suggestion-scroll">
+                      {cards.map((card) => (
+                        <a
+                          key={`${card.kind}-${card.name}`}
+                          className="ta-suggestion-card"
+                          href={card.link || undefined}
+                          target={card.link ? '_blank' : undefined}
+                          rel="noreferrer"
+                        >
+                          <span className="ta-suggestion-kind">{card.kind}</span>
+                          {card.image && (
+                            <img
+                              className="ta-suggestion-card-img"
+                              src={card.image}
+                              alt={card.name}
+                            />
+                          )}
+                          <div className="ta-suggestion-card-body">
+                            <strong>{card.name}</strong>
+                            <span>{card.subtitle}</span>
+                          </div>
+                        </a>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              ))}
-            </div>
-          )}
+              ) : null;
+            })()}
+          </div>
 
           {tripConfirm && (
             <div className="ta-clarify-card">
@@ -1930,9 +1659,9 @@ export function AgentPage() {
                       }${routePlan.suggestions?.cover_image ? ' has-image' : ''}`}
                       style={
                         routePlan.suggestions?.cover_image
-                          ? {
-                              backgroundImage: `linear-gradient(rgba(20, 28, 45, 0.58), rgba(20, 28, 45, 0.72)), url("${routePlan.suggestions.cover_image}")`,
-                            }
+                          ? ({
+                              '--cover-image': `url("${routePlan.suggestions.cover_image}")`,
+                            } as CSSProperties)
                           : undefined
                       }
                       disabled={planning}
@@ -1953,13 +1682,6 @@ export function AgentPage() {
                   </p>
                 </>
               )}
-              {import.meta.env.DEV && <button
-                type="button"
-                className="ta-plan-mock-button"
-                onClick={loadMockData}
-              >
-                加载演示行程
-              </button>}
             </div>
           )}
             </>

@@ -129,7 +129,7 @@ h2 {
 }
 
 .trip-card:hover {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 3px 10px rgba(31, 41, 55, 0.06);
   transform: translateY(-2px);
 }
 
@@ -323,7 +323,7 @@ button:disabled {
 .chip {
   padding: 8px 14px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--surface);
   color: var(--text);
   font-size: 14px;
@@ -489,7 +489,7 @@ button:disabled {
 .profile-option {
   padding: 10px 16px;
   border: 1px solid #dde2ee;
-  border-radius: 999px;
+  border-radius: 10px;
   background: #fff;
   color: #4a5568;
   font-size: 14px;
@@ -505,10 +505,10 @@ button:disabled {
 }
 
 .profile-option.active {
-  background: linear-gradient(115deg, var(--agent-blue), var(--agent-purple));
-  border-color: transparent;
+  background: #4f6df5;
+  border-color: #4f6df5;
   color: #fff;
-  box-shadow: 0 8px 18px rgba(91, 83, 220, 0.2);
+  box-shadow: none;
 }
 
 .profile-actions {
@@ -565,7 +565,7 @@ button:disabled {
   min-width: 220px;
   padding: 16px 30px;
   font-size: 16px;
-  border-radius: 999px;
+  border-radius: 12px;
 }
 
 .agent-hero {
@@ -593,10 +593,8 @@ button:disabled {
 }
 
 .agent-hero h1 span {
-  background: linear-gradient(110deg, var(--agent-blue), var(--agent-purple));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  background: none;
+  color: #4f6df5;
 }
 
 .agent-hero p {
@@ -612,8 +610,8 @@ button:disabled {
 .agent-comparison-section {
   background: #fff;
   border: 1px solid rgba(226, 230, 241, 0.9);
-  border-radius: 24px;
-  box-shadow: 0 18px 55px rgba(35, 42, 73, 0.08);
+  border-radius: 18px;
+  box-shadow: 0 3px 12px rgba(35, 42, 73, 0.045);
 }
 
 .agent-search-card {
@@ -696,20 +694,21 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 10px;
   min-width: 132px;
   padding: 12px 18px;
-  border-radius: 14px;
-  background: linear-gradient(115deg, var(--agent-blue), var(--agent-purple));
-  box-shadow: 0 10px 22px rgba(91, 83, 220, 0.22);
+  border-radius: 12px;
+  background: #4f6df5;
+  box-shadow: none;
   font-size: 14px;
   font-weight: 650;
-  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  transition: background 0.16s ease, border-color 0.16s ease;
 }
 
 .agent-primary-button:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 14px 28px rgba(91, 83, 220, 0.28);
+  background: #425fe9;
+  box-shadow: none;
+  transform: none;
 }
 
 .agent-secondary-button {
@@ -772,7 +771,7 @@ button:disabled {
   height: 42px;
   flex: 0 0 42px;
   border-radius: 14px;
-  background: linear-gradient(135deg, #eef1ff, #f2edff);
+  background: #f1f4ff;
 }
 
 .agent-thinking-orb i {
@@ -829,11 +828,11 @@ button:disabled {
   height: 42px;
   flex: 0 0 42px;
   border-radius: 14px;
-  background: linear-gradient(135deg, var(--agent-blue), var(--agent-purple));
+  background: #4f6df5;
   color: #fff;
   font-size: 12px;
   font-weight: 800;
-  box-shadow: 0 9px 18px rgba(91, 83, 220, 0.22);
+  box-shadow: none;
 }
 
 .agent-response-header > div:last-child {
@@ -870,14 +869,14 @@ button:disabled {
   padding: 18px;
   border: 1px solid var(--agent-line);
   border-radius: 20px;
-  background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+  background: #ffffff;
   transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
 
 .agent-recommendation-card:hover {
   transform: translateY(-2px);
   border-color: #d9dded;
-  box-shadow: 0 14px 30px rgba(38, 45, 78, 0.08);
+  box-shadow: 0 3px 10px rgba(38, 45, 78, 0.045);
 }
 
 .agent-rank {
@@ -973,7 +972,7 @@ button:disabled {
   padding: 20px;
   border: 1px solid #ded9ff;
   border-radius: 20px;
-  background: linear-gradient(120deg, #f8f7ff 0%, #f2f6ff 100%);
+  background: #f7f8fc;
 }
 
 .agent-surprise-icon {
@@ -1160,7 +1159,7 @@ button:disabled {
   height: 30px;
   flex: 0 0 30px;
   border-radius: 10px;
-  background: linear-gradient(135deg, var(--agent-blue), var(--agent-purple));
+  background: #4f6df5;
   color: #fff;
   font-size: 9px;
   font-weight: 800;
@@ -1180,8 +1179,8 @@ button:disabled {
 .agent-message.user .agent-message-bubble {
   color: #fff;
   border-color: transparent;
-  background: linear-gradient(115deg, var(--agent-blue), var(--agent-purple));
-  box-shadow: 0 8px 20px rgba(91, 83, 220, 0.16);
+  background: #4f6df5;
+  box-shadow: none;
 }
 
 .agent-inline-thinking {
@@ -1319,7 +1318,7 @@ button:disabled {
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--agent-blue), var(--agent-purple));
+  background: #4f6df5;
 }
 
 .agent-score-breakdown strong {
@@ -1451,7 +1450,7 @@ button:disabled {
 .agent-rating-btn {
   padding: 6px 12px;
   border: 1px solid #dde2ee;
-  border-radius: 999px;
+  border-radius: 9px;
   background: #fff;
   color: #4a5568;
   font-size: 12px;
@@ -2010,7 +2009,7 @@ button:disabled {
 .ta-clarify-option {
   padding: 6px 10px;
   border: 1px solid #dfe4ef;
-  border-radius: 999px;
+  border-radius: 9px;
   background: #fff;
   color: #5267a8;
   font-size: 12px;
@@ -2214,8 +2213,10 @@ button:disabled {
 }
 
 .ta-plan-style-blocks {
-  padding: 8px 10px;
+  padding: 8px 12px;
   background: #fff;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .ta-plan-style-day {
@@ -2231,16 +2232,19 @@ button:disabled {
 
 .ta-plan-block {
   display: flex;
+  width: 100%;
+  min-width: 0;
   gap: 10px;
-  padding: 7px 0;
+  padding: 8px 8px;
   border-bottom: 1px dashed #eff2f6;
   cursor: pointer;
   border-radius: 8px;
 }
 
 .ta-plan-block.selected {
-  background: #f0edff;
-  box-shadow: 0 0 0 1px rgba(82, 103, 255, 0.35);
+  background: #ffffff;
+  border: 1px solid #cfd6e2;
+  box-shadow: none;
 }
 
 .ta-plan-block:last-child {
@@ -2254,6 +2258,11 @@ button:disabled {
   min-width: 72px;
   font-size: 11px;
   color: #697386;
+}
+
+.ta-plan-block-body {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .ta-plan-block-body strong {
@@ -2290,8 +2299,9 @@ button:disabled {
 .ta-plan-block-match {
   display: inline-block;
   margin-top: 3px;
+  margin-left: 12px;
   margin-right: 8px;
-  color: #4356e8;
+  color: #2f7d6b;
   font-size: 11px;
   font-weight: 700;
 }
@@ -2305,36 +2315,51 @@ button:disabled {
 
 .ta-food-option-wrap {
   display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
   align-items: center;
-  gap: 5px;
+  gap: 7px;
 }
 
 .ta-food-option {
-  padding: 5px 8px;
-  border: 1px solid #e5e9f2;
-  border-radius: 999px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px 9px;
+  border: 1px solid #e2e7ef;
+  border-radius: 8px;
   background: #fff;
   color: #59657a;
   font-size: 11px;
   font-weight: 600;
+  line-height: 1.45;
+  text-align: left;
   cursor: pointer;
 }
 
 .ta-food-option-link {
-  color: #4356e8;
-  font-size: 11px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  white-space: nowrap;
+  padding: 3px 5px;
+  border-radius: 6px;
+  color: #697386;
+  font-size: 10.5px;
   font-weight: 600;
   text-decoration: none;
 }
 
 .ta-food-option-link:hover {
-  text-decoration: underline;
+  background: #f3f5f8;
+  color: #4f6df5;
+  text-decoration: none;
 }
 
 .ta-food-option.active {
-  border-color: #4f6df5;
-  background: #eef2ff;
-  color: #4356e8;
+  border-color: #aeb8c8;
+  background: #ffffff;
+  color: #344054;
+  box-shadow: none;
 }
 
 .ta-trip-question {
@@ -2414,6 +2439,86 @@ button:disabled {
   color: #c2410c;
   font-size: 12px;
   font-weight: 700;
+}
+
+.ta-budget-summary {
+  flex: 0 0 auto;
+  margin: 4px 0 9px;
+  padding: 9px 10px 8px;
+  border: 1px solid #e7eaf0;
+  border-radius: 10px;
+  background: #fbfcfd;
+}
+
+.ta-budget-summary-heading {
+  margin-bottom: 6px;
+  color: #667085;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.ta-budget-summary-grid {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr 0.9fr;
+  gap: 0;
+}
+
+.ta-budget-summary-item {
+  min-width: 0;
+  padding: 1px 9px;
+  border-left: 1px solid #e7eaf0;
+}
+
+.ta-budget-summary-item:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.ta-budget-summary-item span,
+.ta-budget-summary-item strong {
+  display: block;
+}
+
+.ta-budget-summary-item span {
+  margin-bottom: 2px;
+  color: #98a2b3;
+  font-size: 9.5px;
+  line-height: 1.2;
+}
+
+.ta-budget-summary-item strong {
+  color: #344054;
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1.25;
+}
+
+.ta-budget-summary-item.primary strong {
+  color: #1f2937;
+  font-size: 13px;
+}
+
+.ta-budget-summary-item.status.ok strong {
+  color: #26745c;
+}
+
+.ta-budget-summary-item.status.over strong {
+  color: #b54708;
+}
+
+.ta-budget-summary-item.status.unknown strong {
+  color: #667085;
+}
+
+.ta-budget-summary-note {
+  margin: 6px 0 0;
+  color: #7b8496;
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.ta-budget-summary-note.warning {
+  color: #b54708;
 }
 
 .ta-plan-timeline {
@@ -2554,7 +2659,7 @@ button:disabled {
 .ta-tabs button {
   padding: 7px 11px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 9px;
   background: #f0f3f8;
   color: #566176;
   font-size: 11px;
@@ -2571,8 +2676,9 @@ button:disabled {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   gap: 9px;
   padding: 2px 3px 2px 0;
 }
@@ -2583,6 +2689,8 @@ button:disabled {
   align-items: center;
   gap: 14px;
   padding: 12px 13px;
+  height: auto;
+  flex: 0 0 auto;
   border: 1px solid #e9edf4;
   border-radius: 15px;
   background: #fff;
@@ -2656,12 +2764,14 @@ button:disabled {
 
 .ta-social-food-platform {
   flex: 0 0 auto;
-  padding: 3px 7px;
-  border-radius: 999px;
-  background: #eef2ff;
-  color: #5267ff;
+  padding: 2px 6px;
+  border: 1px solid #e1e5eb;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #667085;
   font-size: 10px;
-  font-weight: 700;
+  font-weight: 650;
+  letter-spacing: 0.01em;
 }
 
 .ta-social-food-text {
@@ -3345,7 +3455,7 @@ button:disabled {
   align-self: flex-start;
   padding: 6px 12px;
   border: 1px solid #dfe4ef;
-  border-radius: 999px;
+  border-radius: 9px;
   background: #fff;
   color: #5267a8;
   font-size: 11px;
@@ -3362,7 +3472,7 @@ button:disabled {
   flex: 1 1 0;
   min-height: 0;
   overflow-y: auto;
-  align-content: start;
+  align-items: stretch;
   padding-right: 3px;
 }
 
@@ -3809,12 +3919,13 @@ button:disabled {
 }
 
 .app-nav-link {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   min-height: 38px;
-  padding: 0 14px;
-  border-radius: 11px;
+  padding: 0 12px;
+  border-radius: 8px;
   color: #4162df;
   font-size: 15px;
   font-weight: 600;
@@ -3834,9 +3945,20 @@ button:disabled {
 }
 
 .app-nav-link.active {
+  background: transparent;
+  color: #3155c6;
+  box-shadow: none;
+}
+
+.app-nav-link.active::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 2px;
+  height: 2px;
+  border-radius: 2px;
   background: #4f6df5;
-  color: #ffffff;
-  box-shadow: 0 5px 12px rgba(79, 109, 245, 0.18);
 }
 
 .app-nav-link:active {
@@ -3861,7 +3983,7 @@ button:disabled {
 .app-logout-button {
   padding: 6px 10px;
   border: 1px solid #e4e8f3;
-  border-radius: 999px;
+  border-radius: 9px;
   background: #f7f8ff;
   color: #6171d9;
   font: inherit;
@@ -3902,7 +4024,7 @@ button:disabled {
   background: #4f6df5;
   border-color: #4f6df5;
   color: #ffffff;
-  box-shadow: 0 5px 12px rgba(79, 109, 245, 0.18);
+  box-shadow: none;
 }
 
 .app-profile-icon {
@@ -3942,472 +4064,6 @@ button:disabled {
   }
 }
 /* =========================
-   Home page: adaptive one-screen layout
-   ========================= */
-
-.app-main:has(.home-dashboard-page) {
-  box-sizing: border-box;
-  width: 100%;
-  max-width: none;
-  height: calc(100dvh - 60px);
-  min-height: 0;
-  margin: 0;
-  padding: 26px 64px 30px;
-  overflow: hidden;
-}
-
-.home-dashboard-page {
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-}
-
-.home-dashboard-shell {
-  display: grid;
-  grid-template-rows: minmax(270px, 1.08fr) minmax(250px, 0.92fr);
-  gap: 18px;
-  width: min(1380px, 100%);
-  height: 100%;
-  min-height: 0;
-  margin: 0 auto;
-}
-
-.home-hero-panel {
-  display: grid;
-  grid-template-columns: minmax(0, 1.08fr) minmax(330px, 0.92fr);
-  align-items: center;
-  min-height: 0;
-  overflow: hidden;
-  padding: clamp(24px, 3vw, 44px);
-  border: 1px solid #e8ecf5;
-  border-radius: 28px;
-  background:
-    radial-gradient(circle at 78% 16%, rgba(79, 109, 245, 0.13), transparent 31%),
-    linear-gradient(135deg, #ffffff 0%, #f7f9ff 100%);
-  box-shadow: 0 8px 28px rgba(31, 41, 55, 0.055);
-}
-
-.home-hero-copy {
-  max-width: 690px;
-}
-
-.home-eyebrow,
-.home-section-kicker {
-  display: inline-block;
-  color: #6272d8;
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-}
-
-.home-hero-copy h1 {
-  margin: 13px 0 13px;
-  color: #172033;
-  font-size: clamp(36px, 4vw, 58px);
-  line-height: 1.06;
-  letter-spacing: -0.045em;
-}
-
-.home-hero-copy h1 span {
-  display: block;
-  color: #4f6df5;
-}
-
-.home-hero-copy > p {
-  max-width: 620px;
-  margin: 0;
-  color: #687286;
-  font-size: clamp(13px, 1.2vw, 16px);
-  line-height: 1.75;
-}
-
-.home-hero-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 23px;
-}
-
-.home-primary-action,
-.home-secondary-action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  min-height: 42px;
-  padding: 0 17px;
-  border-radius: 13px;
-  font-size: 13px;
-  font-weight: 750;
-  text-decoration: none;
-}
-
-.home-primary-action {
-  background: #4f6df5;
-  color: #fff;
-  box-shadow: 0 7px 18px rgba(79, 109, 245, 0.18);
-}
-
-.home-primary-action:hover {
-  background: #425fe9;
-}
-
-.home-secondary-action {
-  border: 1px solid #e0e5f0;
-  background: #fff;
-  color: #435068;
-}
-
-.home-secondary-action:hover {
-  background: #f6f8fc;
-}
-
-.home-hero-visual {
-  position: relative;
-  display: grid;
-  min-height: 210px;
-  place-items: center;
-}
-
-.home-visual-card.main {
-  position: relative;
-  z-index: 2;
-  width: min(300px, 78%);
-  padding: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.88);
-  border-radius: 22px;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 18px 42px rgba(49, 62, 111, 0.12);
-  backdrop-filter: blur(12px);
-}
-
-.home-visual-label {
-  color: #7b8497;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.1em;
-}
-
-.home-visual-card.main > strong {
-  display: block;
-  margin-top: 7px;
-  color: #1f2a41;
-  font-size: 23px;
-}
-
-.home-visual-card.main > p {
-  margin: 5px 0 16px;
-  color: #7c8698;
-  font-size: 11px;
-}
-
-.home-score-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  color: #758095;
-  font-size: 10px;
-}
-
-.home-score-row strong {
-  color: #4f6df5;
-  font-size: 18px;
-}
-
-.home-score-track {
-  height: 7px;
-  margin-top: 7px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: #edf0f6;
-}
-
-.home-score-track i {
-  display: block;
-  width: 87%;
-  height: 100%;
-  border-radius: inherit;
-  background: #4f6df5;
-}
-
-.home-visual-orbit {
-  position: absolute;
-  border: 1px solid rgba(79, 109, 245, 0.13);
-  border-radius: 50%;
-}
-
-.orbit-one {
-  width: 310px;
-  height: 310px;
-}
-
-.orbit-two {
-  width: 220px;
-  height: 220px;
-}
-
-.home-visual-chip {
-  position: absolute;
-  z-index: 3;
-  padding: 7px 11px;
-  border: 1px solid #e5e9f4;
-  border-radius: 999px;
-  background: #fff;
-  color: #526078;
-  box-shadow: 0 7px 18px rgba(43, 53, 82, 0.08);
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.chip-flight {
-  top: 17%;
-  right: 5%;
-}
-
-.chip-hotel {
-  bottom: 18%;
-  right: 8%;
-}
-
-.chip-event {
-  bottom: 14%;
-  left: 6%;
-}
-
-.home-bottom-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.45fr);
-  gap: 18px;
-  min-height: 0;
-}
-
-.home-feature-section,
-.home-highlight-panel {
-  min-height: 0;
-  padding: 20px;
-  border: 1px solid #e8ecf5;
-  border-radius: 24px;
-  background: #fff;
-  box-shadow: 0 6px 20px rgba(31, 41, 55, 0.045);
-}
-
-.home-feature-section {
-  display: flex;
-  flex-direction: column;
-}
-
-.home-section-heading {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 18px;
-  margin-bottom: 13px;
-}
-
-.home-section-heading h2,
-.home-highlight-panel h2 {
-  margin: 4px 0 0;
-  color: #1e293d;
-  font-size: 20px;
-}
-
-.home-section-heading > p {
-  margin: 0;
-  color: #939baa;
-  font-size: 11px;
-}
-
-.home-feature-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 11px;
-  flex: 1;
-  min-height: 0;
-}
-
-.home-feature-card {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  padding: 15px;
-  border: 1px solid #ebeff6;
-  border-radius: 17px;
-  background: #fbfcff;
-  color: inherit;
-  text-decoration: none;
-  transition:
-    border-color 0.16s ease,
-    transform 0.16s ease,
-    box-shadow 0.16s ease;
-}
-
-.home-feature-card:hover {
-  transform: translateY(-2px);
-  border-color: #dbe1f1;
-  box-shadow: 0 8px 18px rgba(39, 49, 78, 0.06);
-}
-
-.home-feature-icon {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  border-radius: 10px;
-  background: #edf1ff;
-  color: #4f6df5;
-  font-size: 14px;
-  font-weight: 800;
-}
-
-.home-feature-copy {
-  margin-top: 11px;
-}
-
-.home-feature-copy h3 {
-  margin: 0;
-  color: #263149;
-  font-size: 14px;
-}
-
-.home-feature-copy p {
-  margin: 6px 0 0;
-  color: #7a8497;
-  font-size: 10px;
-  line-height: 1.55;
-}
-
-.home-feature-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: auto;
-  padding-top: 10px;
-  color: #4f6df5;
-  font-size: 10px;
-  font-weight: 750;
-}
-
-.home-highlight-panel {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-
-.home-highlight-panel > p {
-  margin: 8px 0 17px;
-  color: #7b8496;
-  font-size: 11px;
-  line-height: 1.65;
-}
-
-.home-highlight-stats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 7px;
-}
-
-.home-highlight-stats > div {
-  padding: 11px 7px;
-  border-radius: 13px;
-  background: #f7f9fd;
-  text-align: center;
-}
-
-.home-highlight-stats strong {
-  display: block;
-  color: #4f6df5;
-  font-size: 19px;
-}
-
-.home-highlight-stats span {
-  display: block;
-  margin-top: 3px;
-  color: #848d9e;
-  font-size: 9px;
-}
-
-/* Short laptop screens: make both rows denser instead of introducing page scroll */
-@media (max-height: 760px) and (min-width: 901px) {
-  .app-main:has(.home-dashboard-page) {
-    padding-top: 16px;
-    padding-bottom: 18px;
-  }
-
-  .home-dashboard-shell {
-    grid-template-rows: minmax(225px, 1fr) minmax(205px, 0.82fr);
-    gap: 13px;
-  }
-
-  .home-hero-panel {
-    padding-top: 20px;
-    padding-bottom: 20px;
-  }
-
-  .home-hero-copy h1 {
-    margin-top: 9px;
-    margin-bottom: 9px;
-    font-size: clamp(31px, 3.5vw, 48px);
-  }
-
-  .home-hero-actions {
-    margin-top: 15px;
-  }
-
-  .home-feature-section,
-  .home-highlight-panel {
-    padding: 15px;
-  }
-}
-
-@media (max-width: 1100px) {
-  .app-main:has(.home-dashboard-page) {
-    padding-left: 34px;
-    padding-right: 34px;
-  }
-
-  .home-hero-panel {
-    grid-template-columns: minmax(0, 1.1fr) minmax(270px, 0.9fr);
-  }
-
-  .home-bottom-grid {
-    grid-template-columns: minmax(0, 1.45fr) minmax(250px, 0.55fr);
-  }
-}
-
-/* Mobile/tablet can scroll because a true one-screen three-column layout is no longer usable */
-@media (max-width: 900px) {
-  .app-main:has(.home-dashboard-page) {
-    height: auto;
-    min-height: calc(100dvh - 60px);
-    padding: 20px;
-    overflow: visible;
-  }
-
-  .home-dashboard-page {
-    height: auto;
-  }
-
-  .home-dashboard-shell {
-    grid-template-rows: auto auto;
-    height: auto;
-  }
-
-  .home-hero-panel,
-  .home-bottom-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .home-hero-visual {
-    min-height: 250px;
-  }
-
-  .home-feature-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-
-/* =========================
    Agent page micro-cleanup
    ========================= */
 
@@ -4422,135 +4078,13 @@ button:disabled {
   padding-right: 18px;
 }
 /* =========================
-   Original-style HomePage: adaptive one-screen layout
-   Append AFTER previous CSS.
+   HomePage
    ========================= */
 
-/* Keep the original simple homepage, but fit it into the viewport. */
-.app-main:has(.home-page-adaptive) {
-  box-sizing: border-box;
-  width: 100%;
-  max-width: none;
-  height: calc(100dvh - 60px);
-  min-height: 0;
-  margin: 0;
-  padding: 26px 64px 30px;
-  overflow: hidden;
-}
-
-.home-page-adaptive {
-  display: flex;
-  flex-direction: column;
-  width: min(1320px, 100%);
-  height: 100%;
-  min-height: 0;
-  margin: 0 auto;
-}
-
-.home-page-adaptive > h1 {
-  flex: 0 0 auto;
-  margin: 0 0 18px;
-  font-size: 28px;
-}
-
-/* Preserve the old card-grid look, but let the grid occupy the remaining space. */
-.home-page-adaptive .home-destination-grid {
-  flex: 1 1 0;
-  min-height: 0;
-  margin-top: 0;
-  overflow-y: auto;
-  align-content: start;
-  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  gap: 16px;
-  padding-right: 4px;
-}
-
-.home-page-adaptive .home-destination-card {
-  min-height: 0;
-  padding: 18px;
-  border-radius: 14px;
-  box-shadow: 0 4px 14px rgba(31, 41, 55, 0.045);
-}
-
-.home-page-adaptive .home-destination-card h2 {
-  margin: 0 0 5px;
-  font-size: 18px;
-}
-
-.home-page-adaptive .home-destination-card p {
-  margin-top: 7px;
-  margin-bottom: 7px;
-  line-height: 1.55;
-}
-
-/* Slim internal scrollbar if there are more destinations than can fit. */
-.home-page-adaptive .home-destination-grid {
-  scrollbar-width: thin;
-  scrollbar-color: #d6dbe6 transparent;
-}
-
-.home-page-adaptive .home-destination-grid::-webkit-scrollbar {
-  width: 6px;
-}
-
-.home-page-adaptive .home-destination-grid::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: #d6dbe6;
-}
-
-@media (max-height: 760px) and (min-width: 761px) {
-  .app-main:has(.home-page-adaptive) {
-    padding-top: 18px;
-    padding-bottom: 20px;
-  }
-
-  .home-page-adaptive > h1 {
-    margin-bottom: 12px;
-    font-size: 25px;
-  }
-
-  .home-page-adaptive .home-destination-grid {
-    gap: 12px;
-  }
-
-  .home-page-adaptive .home-destination-card {
-    padding: 15px;
-  }
-}
-
-@media (max-width: 760px) {
-  .app-main:has(.home-page-adaptive) {
-    height: auto;
-    min-height: calc(100dvh - 60px);
-    padding: 20px 18px 28px;
-    overflow: visible;
-  }
-
-  .home-page-adaptive {
-    height: auto;
-  }
-
-  .home-page-adaptive .home-destination-grid {
-    overflow: visible;
-    grid-template-columns: 1fr;
-  }
-}
-
-
-/* =========================
-   Agent travel-plan empty state cleanup
-   ========================= */
-
-/* Ensure no leftover second-line helper text appears even if old CSS remains. */
 .ta-plan-empty > span {
   display: none !important;
 }
-/* =========================
-   HomePage adaptive layout
-   Keep the original simple HomePage style
-   ========================= */
 
-/* 首页只占导航栏下方的可视区域，不产生整页上下滚动 */
 .app-main:has(.home-page) {
   box-sizing: border-box;
   width: 100%;
@@ -4562,22 +4096,20 @@ button:disabled {
   overflow: hidden;
 }
 
-/* 保留原来的 agent-page / agent-hero 视觉，只做首页专属尺寸控制 */
 .home-page {
+  display: flex;
   width: 100%;
   height: 100%;
   min-height: 0;
   padding: 0;
-  display: flex;
   align-items: center;
   justify-content: center;
 }
 
-/* 页面内容始终在视口中央 */
 .home-center {
+  display: flex;
   width: min(900px, 100%);
   max-height: 100%;
-  display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -4585,20 +4117,30 @@ button:disabled {
   text-align: center;
 }
 
-/* 覆盖 Agent 页面 hero 的顶部留白，避免首页被撑高 */
 .home-page .agent-hero {
+  display: flex;
   width: 100%;
   max-width: 860px;
   margin: 0;
   padding: 0;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
 }
 
+.home-page .agent-kicker {
+  display: inline-block;
+  color: #637083;
+  letter-spacing: 0.06em;
+  text-transform: none;
+}
+
 .home-page .agent-hero h1 {
-  margin: 14px 0 16px;
+  margin: 14px auto 16px;
   font-size: clamp(42px, 5.2vw, 72px);
   line-height: 1.08;
-  letter-spacing: -0.045em;
+  letter-spacing: 0.01em;
+  text-align: center;
 }
 
 .home-page .agent-hero p {
@@ -4608,18 +4150,22 @@ button:disabled {
   line-height: 1.7;
 }
 
-.home-page .agent-kicker {
-  display: inline-block;
-}
-
 .home-start-button {
   min-width: 170px;
   min-height: 46px;
   padding: 0 20px;
+  border-radius: 12px;
+  background: #4f6df5;
+  box-shadow: none;
   font-size: 14px;
 }
 
-/* 较矮的笔记本屏幕：自动缩小文字和间距，仍然保持一屏 */
+.home-start-button:hover:not(:disabled) {
+  background: #425fe9;
+  box-shadow: none;
+  transform: none;
+}
+
 @media (max-height: 760px) and (min-width: 761px) {
   .app-main:has(.home-page) {
     padding-top: 16px;
@@ -4645,7 +4191,6 @@ button:disabled {
   }
 }
 
-/* 平板/手机：允许自然滚动，避免内容被强行压缩 */
 @media (max-width: 760px) {
   .app-main:has(.home-page) {
     height: auto;
@@ -4671,20 +4216,7 @@ button:disabled {
     width: min(280px, 100%);
   }
 }
-/* 首页主标题真正居中 */
-.home-page .agent-hero h1 {
-  text-align: center;
-  margin-left: auto;
-  margin-right: auto;
-}
 
-/* 让整个 hero 内容也保持居中 */
-.home-page .agent-hero {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-}
 /* Trip route map */
 .ta-map-canvas {
   flex: 1 1 0;
@@ -4779,7 +4311,7 @@ button:disabled {
   margin-bottom: 8px;
   padding: 6px 10px;
   border: 1px solid #e8ebf3;
-  border-radius: 999px;
+  border-radius: 9px;
   background: #fff;
   color: #5267ff;
   font-size: 12px;
@@ -4860,7 +4392,7 @@ button:disabled {
 .ta-plan-rating-button {
   padding: 7px 11px;
   border: 1px solid #e5e9f2;
-  border-radius: 999px;
+  border-radius: 9px;
   background: #fff;
   color: #59657a;
   font-size: 12px;
@@ -5291,7 +4823,7 @@ button:disabled {
 }
 
 /* =========================
-   Agent small text refinements
+   Agent finishing refinements
    ========================= */
 
 .ta-plan-empty {
@@ -5305,12 +4837,6 @@ button:disabled {
   line-height: 1.5;
 }
 
-/* =========================
-   Travel plan readability + bottom-right map refinements
-   Append AFTER current index.css
-   ========================= */
-
-/* 旅行计划里的文字略微放大，仍保持紧凑 */
 .ta-plan-time {
   font-size: 10.5px;
 }
@@ -5326,40 +4852,17 @@ button:disabled {
   line-height: 1.35;
 }
 
-/* 图标略微放大一点，和文字比例更协调 */
 .ta-plan-type {
   width: 27px;
   height: 27px;
   font-size: 12px;
 }
 
-/* 行高略增加，避免放大字体后显得拥挤 */
 .ta-plan-row {
   min-height: 45px;
   padding-top: 7px;
   padding-bottom: 7px;
 }
-/* =========================
-   Floating map size refinement
-   ========================= */
-
-.ta-floating-map {
-  width: min(360px, calc(100vw - 32px));
-  height: min(330px, calc(100dvh - 96px));
-  min-height: 250px;
-}
-
-/* 展开状态继续保持大地图 */
-.ta-floating-map.expanded {
-  width: min(900px, calc(100vw - 48px));
-  height: min(650px, calc(100dvh - 92px));
-}
-
-/* =========================
-   Floating map v3
-   Keep map content size, reduce title bar, prevent bottom overflow
-   Append AFTER current map CSS.
-   ========================= */
 
 .ta-floating-map:not(.expanded) {
   width: min(360px, calc(100vw - 32px));
@@ -5367,7 +4870,12 @@ button:disabled {
   min-height: 250px;
 }
 
-/* 标题栏更矮，地图内容区域基本保持不变 */
+.ta-floating-map.expanded {
+  width: min(900px, calc(100vw - 48px));
+  height: min(650px, calc(100dvh - 92px));
+  min-height: 420px;
+}
+
 .ta-floating-map-handle {
   min-height: 34px;
   padding: 5px 9px;
@@ -5385,11 +4893,10 @@ button:disabled {
 
 .ta-map-expand-button {
   padding: 4px 8px;
-  font-size: 9.5px;
   border-radius: 8px;
+  font-size: 9.5px;
 }
 
-/* 让标题栏压缩掉的高度留给地图内容 */
 .ta-floating-map-style-tabs {
   margin-top: 5px;
 }
@@ -5399,14 +4906,12 @@ button:disabled {
   margin-bottom: 5px;
 }
 
-/* 更短的屏幕进一步收紧，避免底部越界 */
 @media (max-height: 760px) and (min-width: 761px) {
   .ta-floating-map:not(.expanded) {
     height: min(300px, calc(100dvh - 88px));
   }
 }
 
-/* 小屏幕也确保不会贴出底部 */
 @media (max-width: 760px) {
   .ta-floating-map:not(.expanded) {
     width: min(340px, calc(100vw - 24px));
@@ -5414,13 +4919,233 @@ button:disabled {
   }
 }
 
+/* Structured trip confirmation inside the chat stream. */
+.ta-trip-confirm-card {
+  width: min(100%, 398px);
+  max-width: calc(100% - 35px);
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #dfe4eb;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #25314b;
+}
+
+.ta-trip-confirm-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-bottom: 10px;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.ta-trip-confirm-heading strong {
+  color: #1f2937;
+  font-size: 14px;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.ta-trip-confirm-heading span {
+  color: #8a94a6;
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.ta-trip-confirm-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid #e8ecf1;
+  border-radius: 9px;
+  background: #e8ecf1;
+}
+
+.ta-trip-confirm-item {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 0;
+  background: #ffffff;
+}
+
+.ta-trip-confirm-item.wide {
+  grid-column: 1 / -1;
+}
+
+.ta-trip-confirm-item > span,
+.ta-trip-confirm-item > strong {
+  display: block;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ta-trip-confirm-item > span {
+  margin-bottom: 3px;
+  color: #98a2b3;
+  font-size: 9.5px;
+  line-height: 1.35;
+}
+
+.ta-trip-confirm-item > strong {
+  color: #273244;
+  font-size: 12.5px;
+  font-weight: 680;
+  line-height: 1.35;
+}
+
+.ta-trip-confirm-note {
+  margin: 9px 1px 0;
+  color: #7b8496;
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.ta-trip-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.ta-trip-confirm-actions .ta-clarify-submit,
+.ta-trip-confirm-actions .ta-clarify-option {
+  border-radius: 8px;
+}
+
+.ta-trip-confirm-actions .ta-clarify-option {
+  background: #ffffff;
+}
+
+/* Composer starts as one line and grows to about four lines. */
+.ta-chat-composer textarea {
+  min-height: 36px;
+  height: 36px;
+  max-height: 108px;
+  resize: none;
+  overflow-y: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* Keep every candidate card inside the right column, especially food results. */
+.ta-options-column,
+.ta-options-column .ta-option-list,
+.ta-options-column .ta-option-card,
+.ta-options-column .ta-option-main,
+.ta-options-column .ta-option-title-row,
+.ta-options-column .ta-option-title-row > div,
+.ta-options-column .ta-option-meta,
+.ta-options-column .ta-option-tags,
+.ta-options-column .ta-option-actions,
+.ta-social-food,
+.ta-social-food-item {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ta-options-column .ta-option-card {
+  width: 100%;
+  height: auto;
+  min-height: max-content;
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+.ta-option-card-food .ta-option-title-row h3,
+.ta-option-card-food .ta-option-title-row p,
+.ta-option-card-food .ta-option-meta,
+.ta-option-card-food .ta-option-tags,
+.ta-option-card-food .ta-option-meta span,
+.ta-option-card-food .ta-option-tags span {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.ta-option-card-food .ta-option-actions {
+  width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.ta-option-card-food .ta-option-actions > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ta-social-food {
+  width: 100%;
+  height: auto;
+  min-height: max-content;
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+.ta-social-food-text {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* Softer surfaces: fewer floating shadows and fewer pill-shaped controls. */
+.ta-chat-panel,
+.ta-options-panel,
+.ta-map-card,
+.ta-plan-card {
+  box-shadow: 0 1px 5px rgba(31, 41, 55, 0.035);
+}
+
+.ta-option-card {
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.ta-option-card:hover {
+  transform: none;
+  border-color: #d7dce7;
+  box-shadow: none;
+}
+
+.app-nav-link.active {
+  box-shadow: none;
+}
+
+.ta-floating-map {
+  box-shadow: 0 6px 18px rgba(30, 42, 72, 0.09);
+}
+
+.ta-floating-map.expanded {
+  box-shadow: 0 8px 24px rgba(30, 42, 72, 0.11);
+}
+
+.ta-map-side-tab {
+  box-shadow: 0 5px 14px rgba(31, 41, 55, 0.09);
+}
+
+.trip-memory-detail-card {
+  box-shadow: 0 3px 12px rgba(30, 42, 72, 0.045);
+}
+
+@media (max-width: 520px) {
+  .ta-trip-confirm-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ta-trip-confirm-item.wide {
+    grid-column: auto;
+  }
+}
 
 /* =========================
    History trip memory detail
    ========================= */
-.trip-memory-page,
-.trip-memory-detail-page {
+.trip-memory-page {
   width: min(1100px, 100%);
+  margin: 0 auto;
+}
+
+.trip-memory-detail-page {
+  width: min(900px, 100%);
   margin: 0 auto;
 }
 
@@ -5464,12 +5189,13 @@ button:disabled {
 .trip-memory-detail-confirmed {
   display: inline-flex;
   align-items: center;
-  min-height: 27px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: #e9f8f0;
-  color: #168455;
-  font-size: 12px;
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 1px solid #cfe8dc;
+  border-radius: 7px;
+  background: #f5fbf8;
+  color: #23735a;
+  font-size: 11.5px;
   font-weight: 700;
 }
 
@@ -5508,10 +5234,10 @@ button:disabled {
 
 .trip-memory-detail-card {
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 20px;
+  border: 1px solid #e3e7ed;
+  border-radius: 16px;
   background: var(--surface);
-  box-shadow: 0 14px 38px rgba(30, 42, 72, 0.08);
+  box-shadow: none;
 }
 
 .trip-memory-detail-heading {
@@ -5519,8 +5245,8 @@ button:disabled {
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
-  padding: 24px 26px 20px;
-  border-bottom: 1px solid #edf0f6;
+  padding: 24px 28px 20px;
+  border-bottom: 1px solid #edf0f3;
 }
 
 .trip-memory-detail-meta {
@@ -5528,24 +5254,40 @@ button:disabled {
   color: var(--muted);
 }
 
+.trip-memory-record-label {
+  display: block;
+  margin-bottom: 5px;
+  color: #98a2b3;
+  font-size: 11px;
+  font-weight: 650;
+}
+
 .trip-memory-detail-style {
-  padding: 18px 26px;
-  background: #f8faff;
-  border-bottom: 1px solid #edf0f6;
+  padding: 15px 28px 16px;
+  background: #fbfcfd;
+  border-bottom: 1px solid #edf0f3;
+}
+
+.trip-memory-detail-style > span {
+  display: block;
+  margin-bottom: 4px;
+  color: #98a2b3;
+  font-size: 10.5px;
 }
 
 .trip-memory-detail-style strong {
-  font-size: 18px;
+  font-size: 16px;
 }
 
 .trip-memory-detail-style p {
-  margin: 7px 0 0;
+  margin: 5px 0 0;
   color: #667085;
-  line-height: 1.65;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .trip-memory-days {
-  padding: 8px 26px 24px;
+  padding: 8px 28px 24px;
 }
 
 .trip-memory-day {
@@ -5564,7 +5306,7 @@ button:disabled {
 }
 
 .trip-memory-day-title strong {
-  color: var(--primary);
+  color: #202b42;
   font-size: 16px;
 }
 
@@ -5598,6 +5340,24 @@ button:disabled {
   font-size: 12px;
 }
 
+.trip-memory-itinerary-body {
+  position: relative;
+  min-width: 0;
+  padding-left: 18px;
+  border-left: 1px solid #e5e9ef;
+}
+
+.trip-memory-itinerary-body::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  left: -4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #aab4c3;
+}
+
 .trip-memory-itinerary-body strong {
   color: #202b42;
   font-size: 15px;
@@ -5612,10 +5372,18 @@ button:disabled {
 
 .trip-memory-weather-row {
   margin-bottom: 4px;
-  padding: 10px 12px;
-  border: 0;
-  border-radius: 12px;
-  background: #f4f8ff;
+  padding: 9px 11px;
+  border: 1px solid #e9edf2;
+  border-radius: 9px;
+  background: #fafbfc;
+}
+
+.trip-memory-weather-row .trip-memory-itinerary-body {
+  border-left: 0;
+}
+
+.trip-memory-weather-row .trip-memory-itinerary-body::before {
+  display: none;
 }
 
 .trip-memory-review {
@@ -5659,4 +5427,173 @@ button:disabled {
     padding-left: 18px;
     padding-right: 18px;
   }
+}
+
+
+/* =========================
+   Travel plan detail refinements
+   ========================= */
+
+.ta-plan-select-button {
+  border-radius: 7px;
+}
+
+.ta-plan-block.selected .ta-plan-select-button {
+  border-color: #cbd5ea;
+  background: #ffffff;
+  color: #4259b8;
+}
+
+.ta-plan-block.selected .ta-plan-block-left {
+  color: #5f6b80;
+}
+
+.ta-plan-block-options {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.ta-plan-block-options .ta-food-option-wrap {
+  max-width: 100%;
+}
+
+.ta-plan-block-options .ta-food-option {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+
+/* =========================
+   Food social list + selected plan refinement
+   ========================= */
+
+.ta-option-list > .ta-social-food {
+  flex: 0 0 auto;
+  height: auto;
+  min-height: max-content;
+  overflow: visible;
+}
+
+.ta-social-food-item {
+  flex: 0 0 auto;
+  min-height: 28px;
+}
+
+.ta-social-food-text {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ta-plan-block.selected {
+  box-shadow: none;
+}
+
+
+/* =========================
+   UI polish v5 final overrides
+   ========================= */
+.ta-plan-block.selected {
+  background: #ffffff;
+  border: 1.5px solid #8ea2e3;
+  box-shadow: none;
+}
+
+.ta-food-option.active {
+  border-color: #aeb8c8;
+  background: #ffffff;
+  color: #344054;
+  box-shadow: none;
+}
+
+.ta-social-food-platform {
+  border: 1px solid #e1e5eb;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #667085;
+}
+
+.app-nav-link.active {
+  background: transparent;
+  color: #3155c6;
+  box-shadow: none;
+}
+
+.trip-memory-detail-card {
+  box-shadow: none;
+}
+
+
+/* =========================
+   UI polish v6
+   ========================= */
+
+/* Budget status is plain text, never a pill. */
+.ta-budget-summary-item.status strong {
+  display: block;
+  width: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Selected itinerary item: stronger outline only. */
+.ta-plan-block.selected {
+  background: #ffffff;
+  border: 1.5px solid #8ea2e3;
+  box-shadow: none;
+}
+
+/* Activity cards: keep one readable description instead of repeated rows. */
+.ta-option-card-event .ta-option-title-row p {
+  margin-top: 6px;
+  color: #667085;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.ta-option-card-event .ta-option-meta:empty,
+.ta-option-card-event .ta-option-tags:empty {
+  display: none;
+}
+
+.ta-option-card-event .ta-option-title-row h3 {
+  line-height: 1.45;
+}
+
+
+/* =========================
+   UI polish v7
+   Budget status + restaurant selection
+   ========================= */
+
+/* Prevent the generic .status pill style from affecting budget summary status. */
+.ta-budget-summary-item.status {
+  display: block;
+  padding: 1px 9px;
+  border-radius: 0;
+  background: transparent;
+  font-size: inherit;
+}
+
+.ta-budget-summary-item.status strong {
+  display: block;
+  width: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* Make the selected restaurant clearer without using a heavy shadow. */
+.ta-food-option.active {
+  border: 1.5px solid #6f86d9;
+  background: #f7f9ff;
+  color: #2948a6;
+  font-weight: 700;
+  box-shadow: none;
 }

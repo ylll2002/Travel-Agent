@@ -5,18 +5,27 @@ from pathlib import Path
 
 from fastapi import APIRouter
 from pydantic import BaseModel
+import sys
 
 ROOT = Path(__file__).resolve().parents[4]
+
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from agent_env import component_python, subprocess_env
 SEARCH_PY = ROOT / "SearchAgent" / "search.py"
-SEARCH_PYTHON = ROOT / "SearchAgent" / ".venv" / "bin" / "python"
+SEARCH_PYTHON = component_python("SearchAgent")
 
 router = APIRouter(prefix="/search", tags=["search"])
 
 
 def _subprocess_env() -> dict:
-    env = dict(os.environ)
-    env.pop("__PYVENV_LAUNCHER__", None)
-    return env
+    """子进程环境：UTF-8 标准流 + 清理 macOS venv 遗留变量。
+
+    必须与父进程的 encoding="utf-8" 配套，否则子进程会按 GBK 输出中文，
+    父进程按 UTF-8 解码即抛 UnicodeDecodeError。
+    """
+    return subprocess_env()
 
 
 class SearchRequest(BaseModel):
@@ -41,6 +50,8 @@ def search(payload: SearchRequest) -> dict:
                 input=payload.query,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 env=_subprocess_env(),
                 timeout=120,
             )
@@ -69,6 +80,8 @@ def search(payload: SearchRequest) -> dict:
             input=json.dumps(search_payload, ensure_ascii=False),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=_subprocess_env(),
             timeout=180,
         )

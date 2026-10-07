@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import json
+import os
 import signal
 import unittest
 from types import SimpleNamespace
@@ -187,19 +188,43 @@ class PlanMutationTests(unittest.TestCase):
 
 
 class StreamCancellationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_closing_stream_terminates_entire_process_group(self):
-        proc = SimpleNamespace(pid=43210, returncode=None, stdin=MagicMock(), stdout=MagicMock(), stderr=MagicMock(), wait=AsyncMock(return_value=0), terminate=MagicMock(), kill=MagicMock())
-        proc.stdin.drain = AsyncMock()
-        proc.stdout.readline = AsyncMock(return_value=b'{"type":"progress"}\\n')
-        proc.stderr.read = AsyncMock(return_value=b"")
+    """流式接口改为线程读取 subprocess.Popen（跨平台，不依赖事件循环支持子进程）。"""
+
+    async def test_closing_stream_terminates_subprocess(self):
+        payload = [b'{"type":"progress"}\n', b""]
+
+        def fake_readline():
+            return payload.pop(0) if payload else b""
+
+        proc = MagicMock()
+        proc.pid = 43210
+        proc.returncode = None
+        proc.poll.return_value = None  # 关闭时仍在运行，触发清理
+        proc.stdin = MagicMock()
+        proc.stdout = MagicMock()
+        proc.stdout.readline.side_effect = fake_readline
+        proc.stderr = MagicMock()
+        proc.stderr.readline.return_value = b""
+
+        def fake_wait(timeout=None):
+            proc.returncode = 0
+            return 0
+
+        proc.wait.side_effect = fake_wait
+
         response = plan_stream(PlanRequest(destination="杭州", start_date="2026-10-20", end_date="2026-10-21"))
-        with patch("app.api.routes.plan.asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)) as launch, patch("app.api.routes.plan.os.killpg") as killpg:
+        with patch("app.api.routes.plan.subprocess.Popen", return_value=proc) as launch, \
+                patch("app.api.routes.plan._stop_process_group", new=AsyncMock()) as stop:
             first = await response.body_iterator.__anext__()
             self.assertIn('"progress"', first)
             await response.body_iterator.aclose()
-        self.assertTrue(launch.call_args.kwargs["start_new_session"])
-        killpg.assert_called_once_with(proc.pid, signal.SIGTERM)
-        proc.wait.assert_awaited()
+
+        self.assertTrue(launch.called)
+        # 仅在 POSIX 上传 start_new_session；Windows 无进程组概念
+        if os.name == "posix":
+            self.assertTrue(launch.call_args.kwargs.get("start_new_session"))
+        # 关闭流时必须回收子进程
+        stop.assert_awaited()
 
 
 if __name__ == "__main__":

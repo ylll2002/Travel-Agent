@@ -5,20 +5,29 @@ from pathlib import Path
 
 from fastapi import APIRouter
 from pydantic import BaseModel
+import sys
 
 ROOT = Path(__file__).resolve().parents[4]
+
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from agent_env import component_python, subprocess_env
 QUESTION_PY = ROOT / "QuestionAgent" / "agent.py"
-QUESTION_PYTHON = ROOT / "PlanAgent" / ".venv" / "bin" / "python"
+QUESTION_PYTHON = component_python("QuestionAgent", fallback=component_python("PlanAgent"))
 SEARCH_PY = ROOT / "SearchAgent" / "search.py"
-SEARCH_PYTHON = ROOT / "SearchAgent" / ".venv" / "bin" / "python"
+SEARCH_PYTHON = component_python("SearchAgent")
 
 router = APIRouter(prefix="/question", tags=["question"])
 
 
 def _subprocess_env() -> dict:
-    env = dict(os.environ)
-    env.pop("__PYVENV_LAUNCHER__", None)
-    return env
+    """子进程环境：UTF-8 标准流 + 清理 macOS venv 遗留变量。
+
+    必须与父进程的 encoding="utf-8" 配套，否则子进程会按 GBK 输出中文，
+    父进程按 UTF-8 解码即抛 UnicodeDecodeError。
+    """
+    return subprocess_env()
 
 
 class QuestionRequest(BaseModel):
@@ -42,6 +51,8 @@ def ask_question(payload: QuestionRequest) -> dict:
             ),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=_subprocess_env(),
             timeout=75,
         )
@@ -54,6 +65,8 @@ def ask_question(payload: QuestionRequest) -> dict:
                     [str(SEARCH_PYTHON), str(SEARCH_PY), "--web", str(result["query"])],
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     env=_subprocess_env(),
                     timeout=60,
                 )

@@ -3,6 +3,12 @@ import type { SavedRouteBlock } from '../api/types';
 import { api } from '../api/client';
 import { useApi } from '../hooks/useApi';
 
+function formatRecordDate(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || '');
+  if (!match) return value;
+  return `${Number(match[2])}月${Number(match[3])}日`;
+}
+
 function groupBlocksByDay(blocks: SavedRouteBlock[]) {
   const groups = new Map<number, SavedRouteBlock[]>();
   for (const block of blocks) {
@@ -48,16 +54,18 @@ export function TripDetailPage() {
       <div className="trip-memory-detail-card">
         <div className="trip-memory-detail-heading">
           <div>
-            <span className="ta-section-kicker">SAVED PLAN</span>
-            <h1>推荐方案</h1>
+            <span className="trip-memory-record-label">旅行记录</span>
+            <h1>{memory.destination}</h1>
             <p className="trip-memory-detail-meta">
-              {memory.destination} · {memory.start_date} ~ {memory.end_date}
+              {formatRecordDate(memory.start_date)} — {formatRecordDate(memory.end_date)}
+              {days.length > 0 ? ` · ${days.length}天` : ''}
             </p>
           </div>
-          <span className="trip-memory-detail-confirmed">已确认该计划</span>
+          <span className="trip-memory-detail-confirmed">已确认</span>
         </div>
 
         <div className="trip-memory-detail-style">
+          <span>已确认方案</span>
           <strong>{chosenStyle || '已保存方案'}</strong>
           {summary && <p>{summary}</p>}
         </div>
@@ -72,8 +80,8 @@ export function TripDetailPage() {
               return (
                 <section key={day} className="trip-memory-day">
                   <div className="trip-memory-day-title">
-                    <strong>Day {day}</strong>
-                    {date && <span>{date}</span>}
+                    <strong>第 {day} 天</strong>
+                    {date && <span>{formatRecordDate(date)}</span>}
                   </div>
 
                   {weather && (

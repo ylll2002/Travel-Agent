@@ -9,8 +9,13 @@ import validate
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT = BASE_DIR.parent
+
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from agent_env import component_python, subprocess_env
 PLAN_PY = ROOT / "PlanAgent" / "plan.py"
-PLAN_PYTHON = ROOT / "PlanAgent" / ".venv" / "bin" / "python"
+PLAN_PYTHON = component_python("PlanAgent")
 
 
 def generate_plan(context: dict, feedback: str | None = None) -> dict:
@@ -22,6 +27,9 @@ def generate_plan(context: dict, feedback: str | None = None) -> dict:
         input=json.dumps(payload, ensure_ascii=False),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=subprocess_env(),
         timeout=300,
     )
     try:

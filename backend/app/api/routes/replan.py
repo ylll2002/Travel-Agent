@@ -1,14 +1,19 @@
 """Explicit slot replacement, separate from conversational intent routing."""
 
 import json
-import os
-from pathlib import Path
 import subprocess
+import sys
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parents[4]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from agent_env import component_python, component_script, subprocess_env
+
 router = APIRouter(prefix="/plan", tags=["plan"])
 
 
@@ -24,11 +29,17 @@ class ReplanRequest(BaseModel):
 
 
 def run_module(module: str, script: str, payload: dict, timeout: int) -> dict:
-    python = ROOT / module / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    env = dict(os.environ)
-    env.pop("__PYVENV_LAUNCHER__", None)
-    env["PYTHONIOENCODING"] = "utf-8"
-    proc = subprocess.run([str(python), str(ROOT / module / script)], input=json.dumps(payload, ensure_ascii=False), capture_output=True, text=True, encoding="utf-8", timeout=timeout, env=env)
+    """以 JSON 为输入调用组件脚本；解释器路径交由 agent_env 跨平台解析。"""
+    proc = subprocess.run(
+        [str(component_python(module)), str(component_script(module, script))],
+        input=json.dumps(payload, ensure_ascii=False),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        env=subprocess_env(),
+    )
     if proc.returncode != 0:
         raise HTTPException(502, f"{module}运行失败，请查看服务日志并检查依赖配置。")
     try:

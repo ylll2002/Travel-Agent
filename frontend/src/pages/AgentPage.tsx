@@ -11,6 +11,14 @@ type ChatMessage = {
   id: string;
   role: 'assistant' | 'user';
   content: string;
+  kind?: 'text' | 'trip-confirm';
+  tripConfirmData?: Record<string, unknown>;
+};
+
+type TripConfirmField = {
+  label: string;
+  value: string;
+  wide?: boolean;
 };
 
 type OptionType = 'flight' | 'hotel' | 'spot' | 'event' | 'food';
@@ -240,7 +248,7 @@ function mapEvents(items: unknown): EventOption[] {
     scheduleAt: '',
     scheduleLabel: '',
     location: '',
-    tags: String(e?.content ?? '').split(',').map((t) => t.trim()).filter(Boolean),
+    tags: [],
     description: e?.content ?? '',
     price: 0,
     priceKnown: false,
@@ -294,21 +302,53 @@ function mapFood(items: unknown): FoodOption[] {
 const formatPrice = (price: number) => `¥ ${price.toLocaleString()}`;
 const buildId = () => `${Date.now()}-${Math.random()}`;
 
-function formatTripConfirm(data: Record<string, unknown>): string {
-  const lines = ['请确认本次旅行信息：'];
-  if (data.destination) lines.push(`目的地：${data.destination}`);
-  if (data.origin) lines.push(`出发地：${data.origin}`);
-  if (data.start_date) lines.push(`出发日期：${data.start_date}`);
-  if (data.end_date) lines.push(`返程日期：${data.end_date}`);
-  if (data.travelers) lines.push(`出行人数：${data.travelers}`);
-  if (data.budget_unlimited) lines.push('预算：不设限');
-  else if (data.total_budget) lines.push(`总预算：¥ ${Number(data.total_budget).toLocaleString()}`);
-  if (Array.isArray(data.purposes) && data.purposes.length) {
-    lines.push(`兴趣：${(data.purposes as unknown[]).join('、')}`);
+function formatTripDate(value: unknown): string {
+  const text = String(value ?? '').trim();
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (!match) return text;
+  return `${Number(match[2])}月${Number(match[3])}日`;
+}
+
+function formatTravelers(value: unknown): string {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  return /人$/.test(text) ? text : `${text} 人`;
+}
+
+function getTripConfirmFields(data: Record<string, unknown>): TripConfirmField[] {
+  const fields: TripConfirmField[] = [];
+
+  if (data.destination) fields.push({ label: '目的地', value: String(data.destination) });
+  if (data.origin) fields.push({ label: '出发地', value: String(data.origin) });
+  if (data.start_date) fields.push({ label: '出发日期', value: formatTripDate(data.start_date) });
+  if (data.end_date) fields.push({ label: '返程日期', value: formatTripDate(data.end_date) });
+  if (data.travelers) fields.push({ label: '出行人数', value: formatTravelers(data.travelers) });
+
+  if (data.budget_unlimited) {
+    fields.push({ label: '总预算', value: '不设限' });
+  } else if (data.total_budget) {
+    const amount = Number(data.total_budget);
+    fields.push({
+      label: '总预算',
+      value: Number.isFinite(amount) ? `¥${amount.toLocaleString()}` : String(data.total_budget),
+    });
   }
-  if (data.food_keyword) lines.push(`餐饮偏好：${data.food_keyword}`);
-  if (data.notes) lines.push(`其他要求：${data.notes}`);
-  return `${lines.join('\n')}\n确认无误后开始规划，也可以继续补充或修改。`;
+
+  if (Array.isArray(data.purposes) && data.purposes.length) {
+    fields.push({
+      label: '兴趣',
+      value: (data.purposes as unknown[]).map(String).join('、'),
+    });
+  }
+  if (data.food_keyword) fields.push({ label: '餐饮偏好', value: String(data.food_keyword) });
+  if (data.notes) fields.push({ label: '其他要求', value: String(data.notes), wide: true });
+
+  return fields;
+}
+
+function buildTripConfirmContent(data: Record<string, unknown>): string {
+  const details = getTripConfirmFields(data).map((field) => `${field.label}：${field.value}`);
+  return ['请确认本次旅行信息：', ...details, '确认无误后开始规划，也可以继续补充或修改。'].join('\n');
 }
 
 function getOptionPrice(item: OptionItem) {
@@ -364,6 +404,7 @@ export function AgentPage() {
   ]);
 
   const [draft, setDraft] = useState('');
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [activeTab, setActiveTab] = useState<OptionType>('flight');
   const [batchIndex, setBatchIndex] = useState<Record<string, number>>({});
   const [socialBatch, setSocialBatch] = useState(0);
@@ -489,6 +530,38 @@ export function AgentPage() {
 
   function addAssistantMessage(content: string) {
     setMessages((prev) => [...prev, { id: buildId(), role: 'assistant', content }]);
+  }
+
+  function addTripConfirmMessage(data: Record<string, unknown>) {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: buildId(),
+        role: 'assistant',
+        content: buildTripConfirmContent(data),
+        kind: 'trip-confirm',
+        tripConfirmData: data,
+      },
+    ]);
+  }
+
+  function resizeComposer(element: HTMLTextAreaElement) {
+    const minHeight = 36;
+    const maxHeight = 108;
+    element.style.height = `${minHeight}px`;
+    const nextHeight = Math.min(Math.max(element.scrollHeight, minHeight), maxHeight);
+    element.style.height = `${nextHeight}px`;
+    element.style.overflowY = element.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }
+
+  function clearComposer() {
+    setDraft('');
+    if (typeof window === 'undefined') return;
+    window.requestAnimationFrame(() => {
+      if (!composerRef.current) return;
+      composerRef.current.style.height = '36px';
+      composerRef.current.style.overflowY = 'hidden';
+    });
   }
 
   function updateLastAssistantMessage(content: string) {
@@ -730,7 +803,7 @@ export function AgentPage() {
     if (!snapshot || !style || selectedBlocks.size === 0 || replanControllerRef.current) return;
     const targets = snapshot.blocks.filter((block) => selectedBlocks.has(block.id) && block.plan_style === style);
     if (!targets.length) return;
-    setDraft('');
+    clearComposer();
     setMessages((prev) => [...prev, { id: buildId(), role: 'user', content: instruction }]);
     const pendingMeals = snapshot.blocks.filter((block) =>
       block.plan_style === style && block.note === '餐饮推荐' && !selectedBlocks.has(block.id));
@@ -895,7 +968,7 @@ export function AgentPage() {
         setCollectingTrip(true);
         setQuestion(null);
         setTripConfirm(data);
-        addAssistantMessage(formatTripConfirm(data));
+        addTripConfirmMessage(data);
         return;
       }
       if (action === 'plan') {
@@ -1275,7 +1348,7 @@ export function AgentPage() {
         ...prev,
         { id: buildId(), role: 'user', content },
       ]);
-      setDraft('');
+      clearComposer();
       if (/不加|取消|算了|不要/.test(content)) {
         setPendingAdd(null);
         addAssistantMessage('好的，已取消添加。');
@@ -1289,7 +1362,7 @@ export function AgentPage() {
       ...prev,
       { id: buildId(), role: 'user', content },
     ]);
-    setDraft('');
+    clearComposer();
 
     const history: ChatMessage[] = [
       ...messages,
@@ -1572,11 +1645,15 @@ export function AgentPage() {
     }
 
     if (item.type === 'event') {
+      const hasSchedule = Boolean(item.scheduleLabel);
+      const hasPrice = item.price > 0;
+
+      if (!hasSchedule && !hasPrice) return null;
+
       return (
         <>
-          <span>{item.scheduleLabel}</span>
-          <span>{item.subtitle}</span>
-          <span>{item.price > 0 ? formatPrice(item.price) : '活动'}</span>
+          {hasSchedule && <span>{item.scheduleLabel}</span>}
+          {hasPrice && <span>{formatPrice(item.price)}</span>}
         </>
       );
     }
@@ -1603,6 +1680,25 @@ export function AgentPage() {
     );
   }
 
+  const expandedKnownCost = expandedStyle && routePlan
+    ? routePlan.cost_by_style?.[expandedStyle] ?? routePlan.blocks
+        .filter((block) => block.plan_style === expandedStyle)
+        .reduce((sum, block) => sum + (block.price ?? 0), 0)
+    : 0;
+  const expandedUnpricedCount = expandedStyle && routePlan
+    ? routePlan.unpriced_items?.[expandedStyle]?.length ?? 0
+    : 0;
+  const expandedBudgetStatus = expandedStyle && routePlan
+    ? routePlan.budget_by_style?.[expandedStyle]
+      ?? (expandedStyle === routePlan.styles[0] ? routePlan.budget_status : undefined)
+      ?? 'unknown'
+    : 'unknown';
+  const expandedBudgetStatusLabel = expandedBudgetStatus === 'over'
+    ? '超出预算'
+    : expandedBudgetStatus === 'ok'
+      ? '预算内'
+      : '待确认';
+
   return (
     <section className="travel-agent-workbench">
       <div className="travel-agent-layout">
@@ -1616,44 +1712,72 @@ export function AgentPage() {
           </div>
 
           <div className="ta-chat-messages">
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className={`ta-message ${message.role === 'user' ? 'user' : 'assistant'}`}
-              >
-                {message.role === 'assistant' && (
-                  <span className="ta-message-avatar">TR</span>
-                )}
-                <div className="ta-message-bubble">{message.content}</div>
-              </div>
-            ))}
-          </div>
+            {messages.map((message) => {
+              const confirmFields = message.tripConfirmData
+                ? getTripConfirmFields(message.tripConfirmData)
+                : [];
+              const isActiveConfirm = Boolean(
+                tripConfirm && message.tripConfirmData === tripConfirm,
+              );
 
-          {tripConfirm && (
-            <div className="ta-clarify-card">
-              <div className="ta-clarify-title">信息确认</div>
-              <p className="ta-confirm-summary" style={{ whiteSpace: 'pre-line' }}>
-                {formatTripConfirm(tripConfirm)}
-              </p>
-              <div className="ta-clarify-row">
-                <button
-                  type="button"
-                  className="ta-clarify-submit"
-                  onClick={() => void confirmTrip()}
-                  disabled={planning}
+              return (
+                <div
+                  key={message.id}
+                  className={`ta-message ${message.role === 'user' ? 'user' : 'assistant'}`}
                 >
-                  确认，开始规划
-                </button>
-                <button
-                  type="button"
-                  className="ta-clarify-option"
-                  onClick={() => setTripConfirm(null)}
-                >
-                  再补充/修改
-                </button>
-              </div>
-            </div>
-          )}
+                  {message.role === 'assistant' && (
+                    <span className="ta-message-avatar">TR</span>
+                  )}
+
+                  {message.kind === 'trip-confirm' && message.tripConfirmData ? (
+                    <div className="ta-trip-confirm-card">
+                      <div className="ta-trip-confirm-heading">
+                        <strong>请确认本次旅行信息</strong>
+                      </div>
+
+                      <div className="ta-trip-confirm-grid">
+                        {confirmFields.map((field) => (
+                          <div
+                            key={field.label}
+                            className={`ta-trip-confirm-item${field.wide ? ' wide' : ''}`}
+                          >
+                            <span>{field.label}</span>
+                            <strong>{field.value}</strong>
+                          </div>
+                        ))}
+                      </div>
+
+                      <p className="ta-trip-confirm-note">
+                        请核对以上信息；如需调整，可以继续补充。
+                      </p>
+
+                      {isActiveConfirm && (
+                        <div className="ta-trip-confirm-actions">
+                          <button
+                            type="button"
+                            className="ta-clarify-submit"
+                            onClick={() => void confirmTrip()}
+                            disabled={planning}
+                          >
+                            确认并开始规划
+                          </button>
+                          <button
+                            type="button"
+                            className="ta-clarify-option"
+                            onClick={() => setTripConfirm(null)}
+                          >
+                            继续修改
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="ta-message-bubble">{message.content}</div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
 
           {question && (
             <TripQuestions key={JSON.stringify(question.questions)} questions={question.questions} busy={planning}
@@ -1713,8 +1837,12 @@ export function AgentPage() {
               </div>
             )}
             <textarea
+              ref={composerRef}
               value={draft}
-              onChange={(event) => setDraft(event.target.value)}
+              onChange={(event) => {
+                setDraft(event.target.value);
+                resizeComposer(event.currentTarget);
+              }}
               onKeyDown={handleComposerKeyDown}
               placeholder={selectedBlocks.size > 0 ? '重新规划的原因...' : '描述你的旅行想法，或继续补充信息…'}
               disabled={replanning}
@@ -1752,22 +1880,30 @@ export function AgentPage() {
                 <strong>{expandedStyle}</strong>
                 <p>{routePlan.summaries[expandedStyle] ?? ''}</p>
               </div>
-              <div className="ta-plan-detail-total">
-                已知费用估算 ¥{' '}
-                {(routePlan.cost_by_style?.[expandedStyle] ?? routePlan.blocks
-                  .filter((block) => block.plan_style === expandedStyle)
-                  .reduce((sum, block) => sum + (block.price ?? 0), 0))
-                  .toLocaleString()}
-              </div>
-              {(routePlan.budget_by_style?.[expandedStyle] ?? (expandedStyle === routePlan.styles[0] ? routePlan.budget_status : undefined)) === 'over' && (
-                <div className="ta-plan-budget-warning">已知费用已超出总预算</div>
-              )}
-              {!!routePlan.unpriced_items?.[expandedStyle]?.length && (
-                <p className="ta-question-hint">另有{routePlan.unpriced_items[expandedStyle].length}项暂无报价，未计入估算。</p>
-              )}
-              {routePlan.budget_status === 'unknown' && (
-                <div className="ta-plan-budget-warning">部分项目价格未知，总消费仅包含已知金额。</div>
-              )}
+              <section className="ta-budget-summary" aria-label="预算摘要">
+                <div className="ta-budget-summary-heading">预算摘要</div>
+                <div className="ta-budget-summary-grid">
+                  <div className="ta-budget-summary-item primary">
+                    <span>已知费用</span>
+                    <strong>¥ {expandedKnownCost.toLocaleString()}</strong>
+                  </div>
+                  <div className="ta-budget-summary-item">
+                    <span>未报价</span>
+                    <strong>{expandedUnpricedCount} 项</strong>
+                  </div>
+                  <div className={`ta-budget-summary-item status ${expandedBudgetStatus}`}>
+                    <span>预算状态</span>
+                    <strong>{expandedBudgetStatusLabel}</strong>
+                  </div>
+                </div>
+                {expandedBudgetStatus === 'over' ? (
+                  <p className="ta-budget-summary-note warning">已知费用已超出总预算。</p>
+                ) : expandedBudgetStatus === 'unknown' || expandedUnpricedCount > 0 ? (
+                  <p className="ta-budget-summary-note">部分项目价格尚未确认，当前合计仅包含已知金额。</p>
+                ) : (
+                  <p className="ta-budget-summary-note">当前已知费用处于预算范围内。</p>
+                )}
+              </section>
               {confirmedStyle === expandedStyle && selectedBlocks.size === 0 && (
                 <div className="ta-plan-confirmed">已确认该计划</div>
               )}
@@ -1888,7 +2024,7 @@ export function AgentPage() {
                                             rel="noreferrer"
                                             aria-label={`打开${option.name}地图链接`}
                                           >
-                                            地图
+                                            查看地图 ↗
                                           </a>
                                         )}
                                       </span>
@@ -2108,7 +2244,7 @@ export function AgentPage() {
               return (
                 <article
                   key={item.id}
-                  className={`ta-option-card ${added ? 'selected' : ''}`}
+                  className={`ta-option-card ta-option-card-${item.type} ${added ? 'selected' : ''}`}
                   onClick={() => setDetailItem(item)}
                 >
                   <div className="ta-option-main">

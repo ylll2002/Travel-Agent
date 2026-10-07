@@ -33,11 +33,16 @@ from trip_changes import resolve_trip_changes
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 ROOT = BASE_DIR.parent
+
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from agent_env import component_python
 sys.path.insert(0, str(ROOT))
 from shared.pricing import item_price, parse_price, price_sort_key
 from shared.travel import attach_travel_metadata
 SEARCH_PY = ROOT / "SearchAgent" / "search.py"
-SEARCH_PYTHON = ROOT / "SearchAgent" / ".venv" / "bin" / "python"
+SEARCH_PYTHON = component_python("SearchAgent")
 
 
 def _model_options() -> dict:
@@ -1788,6 +1793,8 @@ def refresh_food_for_plan(
             proc = subprocess.run(
                 [str(python) if python.exists() else sys.executable, str(SEARCH_PY), "--food-nearby"],
                 input=json.dumps(payload, ensure_ascii=False), capture_output=True, text=True,
+                                                                                    encoding="utf-8",
+                                                                                    errors="replace",
                 timeout=max(60, min(300, len(anchors) * 30)), env=env,
             )
             nearby = json.loads(proc.stdout or "{}")

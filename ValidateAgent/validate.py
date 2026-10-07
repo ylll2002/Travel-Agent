@@ -78,16 +78,23 @@ def validate_plan(
         context["basic"] = basic
     for _ in range(2):
         try:
+            model = os.getenv("OPENAI_MODEL", "deepseek-flash")
             resp = client.chat.completions.create(
-                model=os.getenv("OPENAI_MODEL", "qwen3.8-27b"),
+                model=model,
                 messages=[
                     {"role": "system", "content": VALIDATE_SYSTEM_PROMPT},
                     {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
                 ],
                 response_format={"type": "json_object"},
-                **({"extra_body": {"enable_thinking": False}} if os.getenv("OPENAI_MODEL", "qwen3.8-27b").lower().startswith("qwen") else {}),
-                max_tokens=2400,
-                timeout=45,
+                # 推理型模型（qwen / deepseek）关闭思考可减少 reasoning 占用；
+                # 注意这不是万能药，仍需为 max_tokens 留足预算（见下方说明）。
+                **({"extra_body": {"enable_thinking": False}}
+                   if model.lower().startswith(("qwen", "deepseek")) else {}),
+                # 推理模型与 content 共享该预算：实测 2400 会被 reasoning 吃满、
+                # content 为空导致审核结果无效（编排层只能降级为"审核未完成"）。
+                # 12000 可稳定留出 content 空间。
+                max_tokens=12000,
+                timeout=120,
             )
         except Exception:
             return _failed_audit("审核服务不可用", "审核调用失败，请稍后重试")

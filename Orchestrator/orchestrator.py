@@ -29,12 +29,17 @@ from langgraph.graph import END, START, StateGraph
 
 ROOT = Path(__file__).resolve().parent.parent
 
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from agent_env import component_python
+
 SEARCH_PY = ROOT / "SearchAgent" / "search.py"
-SEARCH_PYTHON = ROOT / "SearchAgent" / ".venv" / "bin" / "python"
+SEARCH_PYTHON = component_python("SearchAgent")
 PLAN_PY = ROOT / "PlanAgent" / "plan.py"
-PLAN_PYTHON = ROOT / "PlanAgent" / ".venv" / "bin" / "python"
+PLAN_PYTHON = component_python("PlanAgent")
 VALIDATE_PY = ROOT / "ValidateAgent" / "validate.py"
-VALIDATE_PYTHON = ROOT / "ValidateAgent" / ".venv" / "bin" / "python"
+VALIDATE_PYTHON = component_python("ValidateAgent")
 
 MAX_ITERATIONS = 2
 
@@ -153,6 +158,8 @@ def _call(python: Path, script: Path, payload: dict) -> dict:
         input=json.dumps(payload, ensure_ascii=False),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=600,
         env=env,
     )

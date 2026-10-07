@@ -1,5 +1,6 @@
 """餐厅距离要计入可核实的步行绕行；所有地图接口都用 stub。"""
 import copy
+import os
 import unittest
 from unittest.mock import patch
 
@@ -130,15 +131,44 @@ class WalkingRouteTests(unittest.TestCase):
             self.assertIsNone(route_map.walking_route("120.15,30.27", "120.151,30.27", cached_only=True))
         query.assert_not_called()
 
-    def test_long_walk_detour_uses_available_transit_on_map(self):
+    def test_route_leg_collects_metro_drive_and_bike_options(self):
         cache = {"leg": {}, "walking": {}}
-        transit = {"mode": "transit", "distance_m": 3000, "duration_s": 900}
+        metro = {"mode": "metro", "distance_m": 3000, "duration_s": 900, "lines": ["地铁1号线"],
+                 "polyline": [[120.15, 30.27], [120.151, 30.27]]}
+        drive = {"mode": "drive", "distance_m": 3200, "duration_s": 600, "lines": [],
+                 "polyline": [[120.15, 30.27], [120.151, 30.27]]}
+        bike = {"mode": "bike", "distance_m": 2800, "duration_s": 1000, "lines": [],
+                "polyline": [[120.15, 30.27], [120.151, 30.27]]}
         with patch("route_map._load_cache", return_value=cache), \
-             patch("route_map.walking_route", return_value={"mode": "walk", "distance_m": 5748, "duration_s": 4000}), \
-             patch("route_map._transit", return_value=transit), patch("route_map._walk_or_drive") as drive:
+             patch("route_map._transit_modes", return_value=[metro]), \
+             patch("route_map._walk_or_drive", return_value=drive), \
+             patch("route_map._bicycling", return_value=bike):
             leg = route_map.route_leg({"location": "120.15,30.27", "citycode": "0571"}, {"location": "120.151,30.27"})
-        self.assertEqual(leg["mode"], "transit")
-        drive.assert_not_called()
+        self.assertEqual(leg["mode"], "drive")
+        modes = {o["mode"] for o in leg["options"]}
+        self.assertIn("metro", modes)
+        self.assertIn("drive", modes)
+        self.assertIn("bike", modes)
+        drive_option = next(o for o in leg["options"] if o["mode"] == "drive")
+        self.assertGreaterEqual(drive_option["price"], 11)
+        self.assertNotIn("polyline", drive_option)
+
+    def test_transport_blocks_are_geocoded_to_their_stations(self):
+        import route_map
+        blocks = [
+            {"id": "t1", "type": "交通", "name": "去程高铁", "day": 1,
+             "direction": "去", "arr_station": "杭州东站", "dep_station": "上海虹桥站"},
+            {"id": "t2", "type": "交通", "name": "返程高铁", "day": 3,
+             "direction": "回", "arr_station": "上海虹桥站", "dep_station": "杭州东站"},
+        ]
+        with patch.dict(os.environ, {"AMAP_KEY": "local-test-only"}), \
+             patch("route_map.geocode", return_value={"location": "120.1,30.2", "citycode": "0571"}), \
+             patch("route_map._load_cache", return_value={"geo": {}, "leg": {}, "walking": {}}), \
+             patch("route_map._save_cache"):
+            route_map.geocode_blocks(blocks, "杭州")
+        self.assertEqual(blocks[0]["_geo"]["location"], "120.1,30.2")
+        self.assertEqual(blocks[0]["station_name"], "杭州东站")
+        self.assertEqual(blocks[1]["station_name"], "杭州东站")
 
 
 if __name__ == "__main__":

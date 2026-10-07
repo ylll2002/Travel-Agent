@@ -377,5 +377,34 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual([s["type"] for s in day["schedule"]], ["交通", "酒店", "景点"])
 
 
+class EveningActivityTests(unittest.TestCase):
+    def _day(self):
+        return {
+            "day": 1,
+            "hotel": "测试酒店",
+            "activity_window": {"end_min": 22 * 60},
+            "schedule": [
+                {"type": "美食", "meal": "晚餐", "time": "18:00-19:00", "name": "某餐厅"},
+            ],
+        }
+
+    def test_evening_activity_avoids_already_used_poi(self):
+        search = {
+            "destination": "武汉",
+            "poi": [
+                {"name": "洪山广场", "longitude": 120.00, "latitude": 30.00},
+                {"name": "光谷步行街", "longitude": 120.01, "latitude": 30.01},
+            ],
+        }
+        hotel_map = {"测试酒店": {"longitude": 120.005, "latitude": 30.005}}
+        day = self._day()
+        with patch("plan._hotel_coord", return_value=[120.005, 30.005]):
+            plan._add_evening_activity(day, search, hotel_map, {"age_group": "18-25"},
+                                       global_used_names={"洪山广场"})
+        activity_names = [s["name"] for s in day["schedule"] if s.get("type") == "活动"]
+        self.assertEqual(activity_names, ["光谷步行街"])
+        self.assertNotIn("洪山广场", activity_names)
+
+
 if __name__ == "__main__":
     unittest.main()

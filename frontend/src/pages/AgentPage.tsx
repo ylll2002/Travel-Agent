@@ -291,6 +291,15 @@ function formatWalkingInfo(distance: number | null | undefined, duration: number
   return `步行约${Math.round(meters)}米${seconds != null ? ` / ${Math.ceil(seconds / 60)}分钟` : ''}`;
 }
 
+function formatLegSummary(leg: RouteLeg | undefined): string {
+  if (!leg?.options?.length) return '';
+  return leg.options.map((o) => {
+    const minutes = Math.max(1, Math.round(o.duration_s / 60));
+    const price = o.price != null ? ` ¥${o.price}` : '';
+    return `${o.label} ${minutes}分钟${price}`;
+  }).join(' · ');
+}
+
 function mapFood(items: unknown): FoodOption[] {
   return (Array.isArray(items) ? items : []).slice(0, 200).map((f: any, i: number) => ({
     id: `food-${i}`,
@@ -360,6 +369,13 @@ function getTripConfirmFields(data: Record<string, unknown>): TripConfirmField[]
     fields.push({
       label: '兴趣',
       value: (data.purposes as unknown[]).map(String).join('、'),
+    });
+  }
+  if (Array.isArray(data.requested_pois) && data.requested_pois.length) {
+    fields.push({
+      label: '指定景点',
+      value: (data.requested_pois as unknown[]).map(String).join('、'),
+      wide: true,
     });
   }
   if (data.food_keyword) fields.push({ label: '餐饮偏好', value: String(data.food_keyword) });
@@ -534,6 +550,10 @@ export function AgentPage() {
   const styleLegs = useMemo(
     () => routePlan?.legs.filter((leg) => leg.plan_style === activeStyle) ?? [],
     [routePlan, activeStyle],
+  );
+  const expandedLegs = useMemo(
+    () => routePlan?.legs.filter((leg) => leg.plan_style === expandedStyle) ?? [],
+    [routePlan, expandedStyle],
   );
   const planDays = useMemo(
     () => Array.from(new Set(styleBlocks.map((b) => b.day))).sort((a, b) => a - b),
@@ -1676,13 +1696,17 @@ export function AgentPage() {
                             </div>
                           </div>
                         )}
-                        {dayBlocks.map((block) => (
-                          <div
-                            key={block.id}
-                            ref={element => { if (element) activityRefs.current.set(block.id, element); else activityRefs.current.delete(block.id); }}
-                            className={`ta-plan-block ta-plan-block-${block.type}${
-                              selectedBlocks.has(block.id) ? ' selected' : ''
-                            }${reviewLocation?.style === expandedStyle && reviewLocation.ids.includes(block.id) ? ' ta-review-highlight' : ''}`}
+                        {dayBlocks.map((block, index) => {
+                          const nextBlock = dayBlocks[index + 1];
+                          const leg = nextBlock ? expandedLegs.find((l) => l.from === block.id && l.to === nextBlock.id) : undefined;
+                          const legSummary = formatLegSummary(leg);
+                          return (
+                            <div key={block.id}>
+                              <div
+                                ref={element => { if (element) activityRefs.current.set(block.id, element); else activityRefs.current.delete(block.id); }}
+                                className={`ta-plan-block ta-plan-block-${block.type}${
+                                  selectedBlocks.has(block.id) ? ' selected' : ''
+                                }${reviewLocation?.style === expandedStyle && reviewLocation.ids.includes(block.id) ? ' ta-review-highlight' : ''}`}
                             onClick={(event) => {
                               if (!(event.target as Element).closest('button, a, input')) toggleBlock(block.id);
                             }}
@@ -1767,8 +1791,13 @@ export function AgentPage() {
                                 </div>
                               )}
                             </div>
-                          </div>
-                        ))}
+                              </div>
+                              {legSummary ? (
+                                <div className="ta-plan-block-leg">{legSummary}</div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
                       </div>
                     );
                   })}

@@ -15,7 +15,7 @@ REQUIRED_FIELDS = (
     ("total_budget", "本次旅行总预算（也可以填不限）"),
 )
 TEXT_FIELDS = ("destination", "origin", "food_keyword", "notes")
-LIST_FIELDS = ("purposes", "budget_tiers", "travel_style")
+LIST_FIELDS = ("purposes", "requested_pois", "budget_tiers", "travel_style")
 _UNSET_TEXT = {"", "不确定", "未确定", "还没定", "待定", "暂未确定", "不知道", "清除"}
 TRAVEL_STYLES = (
     "自然景观", "历史人文", "主题娱乐", "城市地标与购物", "户外运动与体验",

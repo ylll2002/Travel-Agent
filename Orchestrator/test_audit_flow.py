@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 import orchestrator as flow
+from shared.audit import normalize_audit
 
 
 def high_issue(kind="时间", actionable=True):
@@ -48,7 +49,7 @@ class AuditFlowTests(unittest.TestCase):
         self.assertIn("18:15", second_plan["feedback"])
         self.assertNotIn("餐厅价位可多样化", second_plan["feedback"])
         self.assertIs(result["audit"]["passed"], True)
-        self.assertEqual(result["audit"]["issues"], [medium])
+        self.assertEqual(result["audit"]["issues"], normalize_audit({"passed": True, "issues": [medium]})["issues"])
         self.assertEqual([entry["passed"] for entry in result["history"]], [False, True])
 
     def test_unresolved_hard_budget_failure_stops_after_second_audit(self):
@@ -63,7 +64,7 @@ class AuditFlowTests(unittest.TestCase):
         result, calls = self.execute([audit])
         self.assertEqual(result["iteration"], 1)
         self.assertIs(result["audit"]["passed"], False)
-        self.assertEqual(result["audit"], audit)
+        self.assertEqual(result["audit"], normalize_audit(audit, result["plan"]))
         self.assertEqual(len(calls), 3)
 
     def test_soft_meal_budget_and_free_time_suggestions_do_not_loop(self):
@@ -73,7 +74,7 @@ class AuditFlowTests(unittest.TestCase):
             {"severity": "medium", "type": "预算", "detail": "酒店报价待核实，整体预算unknown", "suggestion": "预订前核实", "actionable": False}]}
         result, _ = self.execute([audit])
         self.assertEqual(result["iteration"], 1)
-        self.assertEqual(result["audit"], audit)
+        self.assertEqual(result["audit"], normalize_audit(audit, result["plan"]))
 
     def test_non_actionable_high_needs_external_information_not_new_plan(self):
         audit = {"passed": False, "issues": [high_issue(actionable=False)]}

@@ -161,5 +161,56 @@ class HybridFlowTests(unittest.TestCase):
         self.assertEqual(source, {"hotels": [{"name": "旧酒店"}]})
 
 
+class EditedPlanAuditTests(unittest.TestCase):
+    def execute(self, plan_error=False):
+        from ValidateAgent.rules import validate_rules
+        from shared.audit import combine_audits
+        original = {"revision": 4, "audit": {"passed": True}, "passed": True,
+                    "blocks": [{"id": "v1", "name": "博物馆", "type": "景点", "price": 30}]}
+        calls = []
+        def call(python, script, payload):
+            calls.append((script, payload))
+            if script == flow.SEARCH_PY:
+                return {"poi": [{"name": "博物馆", "url": "https://example.test/museum"}]}
+            if script == flow.PLAN_PY:
+                self.assertNotIn("audit", payload["plan"])
+                return {"error": "修改失败"} if plan_error else {"blocks": [
+                    {"id": "v1", "name": "博物馆", "type": "景点", "price": 120, "price_known": True,
+                     "day": 1, "date": "2026-10-10", "time": "09:00-11:00", "plan_style": "经典",
+                     "link": "https://example.test/museum"}]}
+            if script == flow.VALIDATE_PY:
+                rule = validate_rules(payload["plan"], payload["search"], payload["basic"])
+                return combine_audits(rule, plan=payload["plan"])
+            raise AssertionError("unexpected subprocess")
+        data = {"destination": "杭州", "start_date": "2026-10-10", "end_date": "2026-10-10",
+                "plan": original, "audit": original["audit"], "basic": {"total_budget": 100},
+                "modify": {"instruction": "换一项活动", "mode": "global"}}
+        with patch.object(flow, "_call", side_effect=call):
+            result = flow.build_graph().invoke(data, {"configurable": {"thread_id": "modified-review"}})
+        return result, calls
+
+    def test_modification_enters_review_and_does_not_automatically_rewrite_choice(self):
+        result, calls = self.execute()
+        self.assertEqual([script for script, _ in calls].count(flow.PLAN_PY), 1)
+        self.assertEqual([script for script, _ in calls].count(flow.VALIDATE_PY), 1)
+        self.assertEqual(result["plan"]["revision"], 5)
+        self.assertEqual(result["audit"]["plan_revision"], 5)
+        self.assertEqual(result["audit"]["status"], "blocked")
+        self.assertNotIn("audit", result["plan"])
+
+    def test_failed_modification_cannot_keep_previous_success(self):
+        result, calls = self.execute(plan_error=True)
+        self.assertEqual(result["audit"]["status"], "error")
+        self.assertFalse(result["audit"]["passed"])
+        self.assertNotIn(flow.VALIDATE_PY, [script for script, _ in calls])
+
+    def test_late_audit_of_an_older_revision_becomes_error(self):
+        with patch.object(flow, "_call", return_value={"passed": True, "issues": [], "plan_revision": 4}):
+            result = flow.validate_node({"plan": {"revision": 5, "blocks": []}, "iteration": 1})
+        self.assertEqual(result["audit"]["status"], "error")
+        self.assertEqual(result["audit"]["plan_revision"], 5)
+        self.assertIsNone(result["feedback"])
+
+
 if __name__ == "__main__":
     unittest.main()

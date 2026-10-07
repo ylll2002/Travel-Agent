@@ -29,7 +29,7 @@ from langgraph.graph import END, START, StateGraph
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-from shared.audit import failed_audit, high_actionable_issues, history_entry, normalize_audit, repair_feedback
+from shared.audit import failed_audit, high_actionable_issues, history_entry, next_plan_revision, normalize_audit, repair_feedback, without_review
 from shared.sources import merge_plan_sources
 
 SEARCH_PY = ROOT / "SearchAgent" / "search.py"
@@ -131,8 +131,8 @@ class State(TypedDict, total=False):
     modify: dict
     search: dict
     plan: dict
-    audit: dict
-    feedback: str
+    audit: dict | None
+    feedback: str | None
     iteration: int
     history: list
 
@@ -166,7 +166,9 @@ def _call(python: Path, script: Path, payload: dict) -> dict:
 
 
 def search_node(state: State) -> dict:
-    basic = state.get("basic") or {}
+    basic = state.get("basic")
+    if not isinstance(basic, dict):
+        basic = (state.get("plan") or {}).get("basic") or {}
     payload = {
         "destination": state["destination"],
         "start_date": state["start_date"],
@@ -186,6 +188,9 @@ def search_node(state: State) -> dict:
 
 
 def plan_node(state: State) -> dict:
+    basic = state.get("basic")
+    if not isinstance(basic, dict):
+        basic = (state.get("plan") or {}).get("basic") or {}
     payload = {
         "profile": state.get("profile"),
         "preferences": state.get("preferences"),
@@ -193,15 +198,21 @@ def plan_node(state: State) -> dict:
         "recent_trip_summary": state.get("recent_trip_summary"),
         "skip_trip_summary": state.get("skip_trip_summary"),
         "search": state.get("search"),
-        "basic": state.get("basic"),
+        "basic": basic,
     }
     if state.get("feedback"):
         payload["feedback"] = state["feedback"]
     if state.get("modify"):
         payload["modify"] = state["modify"]
-    result = _call(PLAN_PYTHON, PLAN_PY, payload)
+        if state.get("plan"):
+            payload["plan"] = without_review(state["plan"])
+    result = without_review(_call(PLAN_PYTHON, PLAN_PY, payload))
+    if state.get("modify") and isinstance(result.get("basic"), dict):
+        basic = deepcopy(result["basic"])
+    result.update(revision=next_plan_revision(state.get("plan")), basic=deepcopy(basic))
     search = merge_plan_sources(state.get("search"), result)
-    return {"plan": result, "search": search, "iteration": state.get("iteration", 0) + 1}
+    return {"plan": result, "search": search, "iteration": state.get("iteration", 0) + 1,
+            "audit": None, "feedback": None, "basic": basic}
 
 
 def _high_actionable_issues(audit: dict | None) -> list[dict]:
@@ -209,19 +220,26 @@ def _high_actionable_issues(audit: dict | None) -> list[dict]:
 
 
 def validate_node(state: State) -> dict:
-    result = _call(
-        VALIDATE_PYTHON,
-        VALIDATE_PY,
-        {
-            "plan": state.get("plan"),
-            "profile": state.get("profile"),
-            "preferences": state.get("preferences"),
-            "recent_trips": state.get("recent_trips"),
-            "search": state.get("search"),
-            "basic": state.get("basic"),
-        },
-    )
+    if (state.get("plan") or {}).get("error"):
+        result = failed_audit("规划失败", "未生成有效方案，无法审核", state.get("plan"))
+    else:
+        result = _call(
+            VALIDATE_PYTHON,
+            VALIDATE_PY,
+            {
+                "plan": state.get("plan"),
+                "profile": state.get("profile"),
+                "preferences": state.get("preferences"),
+                "recent_trips": state.get("recent_trips"),
+                "search": state.get("search"),
+                "basic": state.get("basic"),
+            },
+        )
     try:
+        if isinstance(result, dict) and "plan_revision" in result:
+            expected = (state.get("plan") or {}).get("revision")
+            if result["plan_revision"] != expected or type(result["plan_revision"]) is not type(expected):
+                raise ValueError("review version mismatch")
         result = normalize_audit(result, state.get("plan"), source="mixed")
     except (ValueError, TypeError):
         error = (result.get("error") if isinstance(result, dict) else None) or "审核结果不可用"
@@ -233,7 +251,7 @@ def validate_node(state: State) -> dict:
 
 def should_continue(state: State) -> str:
     audit = state.get("audit") or {}
-    if (audit.get("error") or audit.get("passed") is not False
+    if (state.get("modify") or audit.get("error") or audit.get("passed") is not False
             or (state.get("plan") or {}).get("error")
             or state.get("iteration", 0) >= MAX_ITERATIONS
             or not _high_actionable_issues(audit)):
@@ -242,9 +260,7 @@ def should_continue(state: State) -> str:
 
 
 def should_validate(state: State) -> str:
-    # modify 流程跳过 validate，直接返回修改后的计划
-    if state.get("modify"):
-        return "end"
+    # Recheck edits, but should_continue never silently rewrites an explicit edit.
     return "validate"
 
 
@@ -287,6 +303,7 @@ def _result_output(result: dict, data: dict) -> dict:
         "audit": result.get("audit"),
         "history": result.get("history"),
         "saved_memory": saved_memory,
+        "review_context": {key: result.get(key) for key in ("profile", "preferences", "recent_trips")},
     }
 
 

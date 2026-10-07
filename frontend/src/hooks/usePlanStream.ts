@@ -87,7 +87,7 @@ export function usePlanStream() {
           onEvent({ type: 'error', error: (error as Error).message });
         }
       } finally {
-        setStreaming(false);
+        if (controllerRef.current === controller) setStreaming(false);
       }
     },
     [],

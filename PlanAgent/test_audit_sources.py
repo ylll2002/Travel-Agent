@@ -49,6 +49,26 @@ class AuditSourceTests(unittest.TestCase):
         self.assertTrue(hotel["price_known"])
         self.assertEqual(result["source_updates"]["hotels"], [extra])
 
+    def test_low_level_finalizer_never_carries_previous_review(self):
+        previous = {"revision": 4, "blocks": [], "audit": {"passed": True},
+                    "history": [{"passed": True}], "passed": True}
+        with patch("plan.attach_routes"), patch("plan._align_route_times"):
+            result = plan.finalize_plan(previous)
+        self.assertNotIn("audit", result)
+        self.assertNotIn("history", result)
+        self.assertNotIn("passed", result)
+        self.assertIn("audit", previous)
+
+    def test_global_cli_finalizer_uses_updated_budget_instead_of_previous_input(self):
+        changed = {"basic": {"total_budget": 200}, "plans": []}
+        payload = {"plan": {"revision": 4}, "modify": {"mode": "global", "instruction": "预算改为200"},
+                   "basic": {"total_budget": 100}}
+        with patch("plan.sys.stdin", io.StringIO(json.dumps(payload))), \
+             patch("plan.modify_plan", return_value=changed), patch("plan.blockify", return_value=[]), \
+             patch("plan.finalize_plan", return_value={}) as finalize, redirect_stdout(io.StringIO()):
+            plan.main()
+        self.assertEqual(finalize.call_args.args[2], {"total_budget": 200})
+
 
 if __name__ == "__main__":
     unittest.main()

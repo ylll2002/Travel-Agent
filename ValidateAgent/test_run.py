@@ -15,7 +15,7 @@ class RunLoopTests(unittest.TestCase):
         self.context = {"profile": {"city": "福州"}, "preferences": {"culture": True},
                         "recent_trips": [{"destination": "上海"}], "search": {"poi": [{"name": "博物馆"}]},
                         "basic": {"total_budget": 4000}}
-        self.plan = {"revision": 2, "blocks": []}
+        self.plan = {"revision": 1, "blocks": []}
 
     def execute(self, audits):
         with patch.object(run, "generate_plan", return_value=self.plan) as generate, \
@@ -88,6 +88,46 @@ class RunLoopTests(unittest.TestCase):
         for limit in (0, 3, True):
             with self.subTest(limit=limit), self.assertRaises(ValueError):
                 run.run_loop(self.context, limit)
+
+    def test_explicit_edit_reviews_once_without_reapplying_instruction(self):
+        original = {"revision": 4, "blocks": [], "audit": {"passed": True}}
+        context = {**self.context, "plan": original, "modify": {"instruction": "换一家餐厅"}}
+        raw = {"passed": False, "issues": [issue()]}
+        with patch.object(run, "generate_plan", return_value=self.plan) as generate, \
+             patch.object(run.validate, "validate_plan", return_value=raw) as validate:
+            result = run.run_loop(context)
+        generate.assert_called_once()
+        validate.assert_called_once()
+        self.assertEqual(result["plan"]["revision"], 5)
+        self.assertEqual(result["audit"]["plan_revision"], 5)
+        self.assertNotIn("audit", result["plan"])
+        self.assertFalse(result["passed"])
+        self.assertEqual(original["revision"], 4)
+
+    def test_old_review_revision_is_not_relabelled_as_new(self):
+        raw = {"passed": True, "issues": [], "plan_revision": 0}
+        result, generate, _ = self.execute([raw])
+        self.assertEqual(result["audit"]["status"], "error")
+        self.assertFalse(result["passed"])
+        generate.assert_called_once()
+
+    def test_edit_without_repeated_basic_keeps_saved_hard_budget(self):
+        context = {"plan": {"revision": 4, "basic": {"total_budget": 100}}, "modify": {"instruction": "换一个"}}
+        with patch.object(run, "generate_plan", return_value=self.plan), \
+             patch.object(run.validate, "validate_plan", return_value={"passed": True, "issues": []}) as validate:
+            run.run_loop(context)
+        self.assertEqual(validate.call_args.kwargs["basic"], {"total_budget": 100})
+        self.assertNotIn("basic", context)
+
+    def test_global_edit_reviews_the_resolved_new_budget(self):
+        changed = {**self.plan, "basic": {"total_budget": 200}}
+        context = {"plan": {"revision": 4}, "basic": {"total_budget": 100},
+                   "modify": {"mode": "global", "instruction": "预算改成200"}}
+        with patch.object(run, "generate_plan", return_value=changed), \
+             patch.object(run.validate, "validate_plan", return_value={"passed": True, "issues": []}) as validate:
+            run.run_loop(context)
+        self.assertEqual(validate.call_args.kwargs["basic"], {"total_budget": 200})
+        self.assertEqual(context["basic"], {"total_budget": 100})
 
 
 if __name__ == "__main__":

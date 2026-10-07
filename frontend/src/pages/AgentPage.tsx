@@ -6,6 +6,8 @@ import type { RouteBlock, RouteLeg } from '../components/TripMap';
 import { TripQuestions } from '../components/TripQuestions';
 import type { TripQuestion } from '../components/TripQuestions';
 import { usePlanStream } from '../hooks/usePlanStream';
+import { currentAudit, reviewMessage } from '../lib/planReview';
+import type { PlanAudit, ReviewContext } from '../lib/planReview';
 
 type ChatMessage = {
   id: string;
@@ -98,6 +100,12 @@ function knownPrice(value: unknown): number | null {
 }
 
 type RoutePlan = {
+  revision?: number;
+  audit?: PlanAudit | null;
+  history?: Array<Record<string, unknown>>;
+  review_pending?: boolean;
+  review_context?: ReviewContext;
+  basic?: Record<string, unknown>;
   destination: string;
   start_date: string;
   end_date: string;
@@ -399,6 +407,8 @@ export function AgentPage() {
   const [addTime, setAddTime] = useState('');
   const lastSearchRef = useRef<Record<string, unknown>>({});
   const intentVersionRef = useRef(0);
+  const planRequestVersionRef = useRef(0);
+  const committedSearchRef = useRef<Record<string, unknown>>({});
   const requestControllerRef = useRef<(AbortController & { mutation?: boolean }) | null>(null);
   const [planning, setPlanning] = useState(false);
   const [mapPosition, setMapPosition] = useState(() => {
@@ -516,10 +526,12 @@ export function AgentPage() {
   }
 
   async function runPlan(payload: Record<string, unknown>) {
+    const version = ++planRequestVersionRef.current;
     setPlanning(true);
     await startPlanStream(
       payload,
       (event) => {
+        if (version !== planRequestVersionRef.current) return;
         if (event.type === 'node') {
           const nodeData = event.data as { node?: unknown; search?: unknown };
           const node = String(nodeData.node ?? '');
@@ -546,7 +558,13 @@ export function AgentPage() {
         }
 
         const raw = event.data ?? {};
+        if (typeof raw.error === 'string') {
+          updateLastAssistantMessage(`规划失败：${raw.error}`);
+          return;
+        }
         const plan = (raw.plan ?? {}) as {
+          revision?: number;
+          basic?: Record<string, unknown>;
           destination?: string;
           start_date?: string;
           end_date?: string;
@@ -574,7 +592,12 @@ export function AgentPage() {
         }
         const blocks = plan.blocks ?? [];
         const legs = plan.legs ?? [];
+        const audit = currentAudit(raw.audit, plan.revision);
         setRoutePlan({
+          revision: plan.revision, audit, review_pending: false,
+          history: Array.isArray(raw.history) ? raw.history : [],
+          review_context: raw.review_context as ReviewContext | undefined,
+          basic: plan.basic,
           destination: plan.destination ?? '',
           start_date: plan.start_date ?? '',
           end_date: plan.end_date ?? '',
@@ -597,70 +620,79 @@ export function AgentPage() {
         setSaveState('idle');
         setSelectedBlocks(new Set());
 
-        applySearchData((raw.search ?? {}) as Record<string, unknown>);
+        committedSearchRef.current = (raw.search ?? {}) as Record<string, unknown>;
+        applySearchData(committedSearchRef.current);
         setPlanItemIds([]);
         setDetailItem(null);
 
         const located = blocks.filter((b) => b.lng != null).length;
-        const audit = raw.audit as { passed?: boolean; error?: string; issues?: Array<{ detail?: string }> } | undefined;
-        const review = audit?.error ? '审核暂未完成，可继续查看和调整行程。'
-          : audit?.passed === false ? `审核提示：${(audit.issues ?? []).slice(0, 3).map((issue) => issue.detail).filter(Boolean).join('；') || '建议进一步检查行程安排。'}`
-          : audit?.issues?.length ? `审核建议：${audit.issues.slice(0, 3).map((issue) => issue.detail).filter(Boolean).join('；')}` : '';
+        const review = reviewMessage(audit);
         const message = legs.length > 0
             ? `已为「${plan.destination}」生成 ${styles.length} 个方案，右上地图展示了 ${located} 个地点和 ${legs.length} 段真实路线。`
             : `已为「${plan.destination}」生成行程。地图显示已定位地点，暂未获取到详细交通路线。`;
         updateLastAssistantMessage([message, review, ...(plan.warnings ?? []).slice(0, 3), ...(plan.food_warnings ?? []).slice(0, 2)].filter(Boolean).join('\n'));
       },
-    );
-
-    setPlanning(false);
+    ).finally(() => {
+      if (version === planRequestVersionRef.current) setPlanning(false);
+    });
   }
 
   async function mutatePlan(change: Record<string, unknown>, successMessage: string): Promise<boolean> {
     if (!routePlan || planning || (requestControllerRef.current?.mutation && !requestControllerRef.current.signal.aborted)) return false;
     const controller: AbortController & { mutation?: boolean } = new AbortController();
     controller.mutation = true;
+    const version = ++planRequestVersionRef.current;
     requestControllerRef.current = controller;
+    setRoutePlan((prev) => prev ? { ...prev, review_pending: true } : prev);
     setPlanning(true);
     try {
       const userId = localStorage.getItem('currentUser') || '';
       let profile: unknown = null;
-      let basic: unknown = null;
+      let basic: unknown = routePlan.basic ?? null;
       try {
         profile = JSON.parse(localStorage.getItem('userProfile') || 'null');
       } catch {
         profile = null;
       }
       try {
-        basic = JSON.parse(localStorage.getItem('tripInfo') || 'null');
+        if (!basic) basic = JSON.parse(localStorage.getItem('tripInfo') || 'null');
       } catch {
-        basic = null;
+        basic = routePlan.basic ?? null;
       }
+      profile = profile ?? routePlan.review_context?.profile;
       const raw = await api.plan({
         destination: routePlan.destination,
         start_date: routePlan.start_date,
         end_date: routePlan.end_date,
         ...(userId ? { user_id: userId } : {}),
         ...(profile ? { profile } : {}),
+        preferences: routePlan.review_context?.preferences,
+        recent_trips: routePlan.review_context?.recent_trips,
         ...(basic ? { basic } : {}),
         plan: routePlan,
-        search: lastSearchRef.current,
+        search: committedSearchRef.current,
         modify: {
           blocks: routePlan.blocks,
           plan_style: expandedStyle || activeStyle || routePlan.styles[0],
           ...change,
         },
       }, controller.signal);
-      if (controller.signal.aborted || requestControllerRef.current !== controller) return false;
+      if (controller.signal.aborted || requestControllerRef.current !== controller || version !== planRequestVersionRef.current) return false;
       if (typeof raw.error === 'string') {
         throw new Error(raw.error);
       }
       if (!Array.isArray(raw.blocks)) throw new Error('没有收到更新后的计划，请重试。');
+      const audit = currentAudit(raw.audit, raw.revision);
       const newBlocks = raw.blocks as RouteBlock[];
       const plans = Array.isArray(raw.plans) ? raw.plans as Array<{ style: string; summary: string }> : [];
       const styles = plans.map((item) => item.style).filter(Boolean);
       setRoutePlan((prev) => prev ? {
         ...prev,
+        revision: typeof raw.revision === 'number' ? raw.revision : undefined,
+        audit, review_pending: false,
+        history: Array.isArray(raw.history) ? raw.history : [],
+        review_context: raw.review_context as ReviewContext | undefined,
+        basic: raw.basic as Record<string, unknown> | undefined ?? prev.basic,
         destination: String(raw.destination ?? prev.destination),
         start_date: String(raw.start_date ?? prev.start_date),
         end_date: String(raw.end_date ?? prev.end_date),
@@ -673,11 +705,12 @@ export function AgentPage() {
         budget_by_style: raw.budget_by_style as RoutePlan['budget_by_style'] ?? prev.budget_by_style,
         unpriced_items: raw.unpriced_items as RoutePlan['unpriced_items'] ?? prev.unpriced_items,
       } : prev);
-      const updatedSearch = raw.search && typeof raw.search === 'object' ? raw.search as Record<string, unknown> : lastSearchRef.current;
-      applySearchData({ ...updatedSearch,
+      const updatedSearch = raw.search && typeof raw.search === 'object' ? raw.search as Record<string, unknown> : committedSearchRef.current;
+      committedSearchRef.current = { ...updatedSearch,
         ...(Array.isArray(raw.food) ? { food: raw.food } : {}),
         ...(Array.isArray(raw.food_by_anchor) ? { food_by_anchor: raw.food_by_anchor } : {}),
-      });
+      };
+      applySearchData(committedSearchRef.current);
       if (raw.basic && typeof raw.basic === 'object') {
         localStorage.setItem('tripInfo', JSON.stringify(raw.basic));
         setTripData({ ...raw.basic as Record<string, unknown>,
@@ -690,16 +723,17 @@ export function AgentPage() {
       setConfirmedStyle(null);
       setSaveState('idle');
       const timingWarnings = Array.isArray(raw.travel_time_warnings) ? raw.travel_time_warnings.filter((item): item is string => typeof item === 'string') : [];
-      updateLastAssistantMessage([successMessage, ...timingWarnings.slice(0, 3)].join('\n'));
+      updateLastAssistantMessage([successMessage, reviewMessage(audit), ...timingWarnings.slice(0, 3)].join('\n'));
       return true;
     } catch (error) {
-      if ((error as Error).name === 'AbortError' || controller.signal.aborted || requestControllerRef.current !== controller) return false;
+      if ((error as Error).name === 'AbortError' || controller.signal.aborted || requestControllerRef.current !== controller || version !== planRequestVersionRef.current) return false;
       updateLastAssistantMessage(
         `修改失败：${error instanceof Error ? error.message : String(error)}`,
       );
       return false;
     } finally {
-      if (requestControllerRef.current === controller) {
+      if (requestControllerRef.current === controller && version === planRequestVersionRef.current) {
+        setRoutePlan((prev) => prev ? { ...prev, review_pending: false } : prev);
         requestControllerRef.current = null;
         setPlanning(false);
       }
@@ -889,6 +923,8 @@ export function AgentPage() {
 
 
   function loadMockData() {
+    planRequestVersionRef.current += 1;
+    committedSearchRef.current = {};
     const styles = ['轻享周末', '深度漫游'];
     const summaries: Record<string, string> = {
       轻享周末: '杭州 2 日轻松游，西湖、灵隐寺与河坊街，节奏舒缓、适合周末放松。',
@@ -1198,6 +1234,8 @@ export function AgentPage() {
 
   function stopPlanning() {
     intentVersionRef.current += 1;
+    planRequestVersionRef.current += 1;
+    setRoutePlan((prev) => prev ? { ...prev, review_pending: false } : prev);
     requestControllerRef.current?.abort();
     stopPlanStream();
     setPlanning(false);

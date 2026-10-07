@@ -63,6 +63,8 @@ export const api = {
     start_date?: string;
     end_date?: string;
     profile?: unknown;
+    preferences?: unknown;
+    recent_trips?: unknown;
     basic?: unknown;
     modify?: unknown;
     plan?: unknown;

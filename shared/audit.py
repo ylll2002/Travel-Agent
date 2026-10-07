@@ -196,3 +196,18 @@ def combine_audits(rule_audit, model_audit=None, plan=None):
     elif model is None and not blocked:
         result.update(passed=False, error="模型审核尚未完成", feedback="仅规则通过，完整审核仍需模型结论。")
     return normalize_audit(result, plan, source="mixed")
+
+
+REVIEW_FIELDS = ("audit", "history", "passed", "final_feedback", "checks", "rule_summary", "review_pending")
+
+
+def without_review(plan):
+    """Copy a plan for editing without carrying conclusions about an older snapshot."""
+    result = deepcopy(plan) if isinstance(plan, dict) else {}
+    for key in REVIEW_FIELDS:
+        result.pop(key, None)
+    return result
+
+
+def next_plan_revision(previous):
+    return (_revision(previous) or 0) + 1

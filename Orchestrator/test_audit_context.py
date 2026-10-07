@@ -65,6 +65,25 @@ class AuditContextTests(unittest.TestCase):
         self.assertIsNone(result["feedback"])
         self.assertEqual(flow.should_continue({"plan": plan, "iteration": 1, **result}), "end")
 
+    def test_edit_falls_back_to_saved_basic_and_invalidates_old_audit(self):
+        previous = {"revision": 4, "basic": {"total_budget": 100}, "audit": {"passed": True}, "blocks": []}
+        with patch.object(flow, "_call", return_value={"blocks": []}) as call:
+            result = flow.plan_node({"plan": previous, "modify": {"mode": "global"}})
+        self.assertEqual(call.call_args.args[2]["basic"], {"total_budget": 100})
+        self.assertEqual(result["basic"], {"total_budget": 100})
+        self.assertIsNone(result["audit"])
+        self.assertNotIn("audit", result["plan"])
+        self.assertEqual(result["plan"]["revision"], 5)
+        self.assertIn("audit", previous)
+
+    def test_global_edit_keeps_the_resolved_new_budget_for_review(self):
+        changed = {"blocks": [], "basic": {"total_budget": 200}}
+        with patch.object(flow, "_call", return_value=changed):
+            result = flow.plan_node({"plan": {"revision": 4}, "basic": {"total_budget": 100},
+                                     "modify": {"mode": "global"}})
+        self.assertEqual(result["basic"], {"total_budget": 200})
+        self.assertEqual(result["plan"]["basic"], {"total_budget": 200})
+
 
 if __name__ == "__main__":
     unittest.main()

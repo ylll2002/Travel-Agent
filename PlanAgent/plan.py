@@ -43,6 +43,7 @@ load_dotenv(BASE_DIR / ".env")
 ROOT = BASE_DIR.parent
 sys.path.insert(0, str(ROOT))
 from shared.sources import merge_plan_sources
+from shared.audit import without_review
 
 SEARCH_PY = ROOT / "SearchAgent" / "search.py"
 SEARCH_PYTHON = ROOT / "SearchAgent" / ".venv" / "bin" / "python"
@@ -2785,6 +2786,7 @@ def modify_plan(
     basic: dict | None = None,
 ) -> dict:
     """基于上一版完整计划做修改，支持全局修改（global）和 block 修改（block）。"""
+    plan = without_review(plan)
     if (modify or {}).get("mode") == "block":
         return _modify_block_local(plan, modify, search_result, profile, basic)
 
@@ -3142,6 +3144,7 @@ def _align_route_times(plan: dict, adjust: bool = False) -> None:
 def finalize_plan(plan: dict, search_result: dict | None = None, basic: dict | None = None,
                   refresh_food: bool = False, refresh_food_targets: list | None = None) -> dict:
     """Rebuild itineraries, meal anchors, prices and map after a mutation, without another LLM call."""
+    plan = without_review(plan)
     result = rebuild_itineraries(plan) if isinstance(plan.get("blocks"), list) else dict(plan)
     search_result = dict(search_result or {})
     if refresh_food:
@@ -3214,7 +3217,8 @@ def main() -> None:
             if isinstance(result, dict) and "error" not in result:
                 result["blocks"] = blockify(result)
                 if not data.get("defer_finalize"):
-                    result = finalize_plan(result, data.get("search"), data.get("basic"), refresh_food=True,
+                    updated_basic = result.get("basic") if isinstance(result.get("basic"), dict) else data.get("basic")
+                    result = finalize_plan(result, data.get("search"), updated_basic, refresh_food=True,
                                            refresh_food_targets=data.get("refresh_food_targets"))
         # 局部修改模式：输入含 blocks + instruction，只改选中块
         elif isinstance(data, dict) and data.get("blocks") is not None and data.get("instruction"):

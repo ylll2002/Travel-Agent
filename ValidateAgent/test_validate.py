@@ -98,11 +98,150 @@ class ValidateTests(unittest.TestCase):
                 self.assertFalse(result["passed"])
                 self.assertEqual(factory.return_value.chat.completions.create.call_count, 2)
 
+    def test_retry_explains_invalid_location_and_keeps_same_input(self):
+        bad = {"passed": False, "issues": [{"severity": "high", "detail": "冲突", "suggestion": "修改", "block_ids": ["invented"]}]}
+        client = self.model([json.dumps(bad), json.dumps({"passed": True, "issues": []})])
+        result = validate_plan({"revision": 3, "blocks": []})
+        self.assertTrue(result["passed"])
+        first, second = client.chat.completions.create.call_args_list
+        self.assertEqual(first.kwargs["messages"][:2], second.kwargs["messages"][:2])
+        self.assertEqual(len(first.kwargs["messages"]), 2)
+        self.assertIn("位置", second.kwargs["messages"][-1]["content"])
+        self.assertIn("暂无报价", second.kwargs["messages"][-1]["content"])
+
+    def test_truncated_reply_gets_one_larger_complete_retry(self):
+        truncated = SimpleNamespace(choices=[SimpleNamespace(finish_reason="length",
+            message=SimpleNamespace(content='{"passed":true,"issues":['))])
+        with patch("validate.OpenAI") as factory:
+            client = factory.return_value
+            client.chat.completions.create.side_effect = [truncated, response('{"passed":true,"issues":[]}')]
+            result = validate_plan({"revision": 3})
+        self.assertTrue(result["passed"])
+        self.assertEqual(client.chat.completions.create.call_count, 2)
+        calls = client.chat.completions.create.call_args_list
+        self.assertGreater(calls[1].kwargs["max_tokens"], calls[0].kwargs["max_tokens"])
+        self.assertIn("截断", calls[1].kwargs["messages"][-1]["content"])
+
+    def test_repeated_invalid_json_reports_specific_failure_not_quote_block(self):
+        client = self.model(['{"passed":', '{"passed":'])
+        result = validate_plan({})
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["error"], "模型审核未返回有效JSON")
+        self.assertEqual(client.chat.completions.create.call_count, 2)
+
     def test_invalid_response_can_be_repaired_once(self):
         verdict = {"passed": True, "issues": []}
         client = self.model(["not JSON", json.dumps(verdict)])
         self.assertEqual(validate_plan({}), normalize_audit(verdict))
         self.assertEqual(client.chat.completions.create.call_count, 2)
+
+
+    def test_compact_paths_expand_from_input_without_copying_model_values(self):
+        plan = {"revision": 3, "blocks": [{"id": "b6", "day": 1, "name": "宋城",
+                "note": "较长说明" * 1000, "unit_price": None, "price_known": False}]}
+        raw = {"passed": True, "issues": [{"severity": "medium", "type": "预算",
+               "detail": "报价待核实", "suggestion": "预订前核实", "actionable": False,
+               "block_ids": ["b6"], "evidence": ["plan.blocks[0].unit_price", "plan.blocks[0].price_known"]}]}
+        client = self.model([json.dumps(raw)])
+        result = validate_plan(plan)
+        self.assertEqual(result["status"], "warning")
+        self.assertEqual(result["issues"][0]["evidence"], [
+            {"path": "plan.blocks[0].unit_price", "value": None},
+            {"path": "plan.blocks[0].price_known", "value": False}])
+        self.assertEqual(client.chat.completions.create.call_count, 1)
+        self.assertEqual(raw["issues"][0]["evidence"][0], "plan.blocks[0].unit_price")
+        self.assertLess(len(json.dumps(raw)), 500)
+
+    def test_missing_or_overly_broad_evidence_paths_require_another_complete_reply(self):
+        for path in ("plan.blocks", "plan.blocks[99].name", "plan.__class__", "rule_review.issues[0].detail"):
+            with self.subTest(path=path):
+                raw = {"passed": False, "issues": [{"severity": "high", "detail": "冲突",
+                       "suggestion": "调整", "evidence": [path]}]}
+                client = self.model([json.dumps(raw), json.dumps({"passed": True, "issues": []})])
+                result = validate_plan({"blocks": [{"name": "宋城", "options": []}]})
+                self.assertTrue(result["passed"])
+                self.assertEqual(client.chat.completions.create.call_count, 2)
+                self.assertIn("依据路径", client.chat.completions.create.call_args.kwargs["messages"][-1]["content"])
+
+    def test_common_path_notation_and_path_only_records_resolve_exact_values(self):
+        plan = {"blocks": [{"name": "宋城", "options": [], "price_known": False}]}
+        paths = ["  `$.plan.blocks[0].name`  ", "plan['blocks'][0]['price_known']",
+                 {"path": "plan.blocks[0].options"}]
+        raw = {"passed": True, "issues": [{"severity": "medium", "detail": "需核实",
+               "suggestion": "确认报价", "evidence": paths}]}
+        client = self.model([json.dumps(raw)])
+        result = validate_plan(plan)
+        self.assertNotIn("error", result)
+        self.assertEqual(client.chat.completions.create.call_count, 1)
+        self.assertEqual(result["issues"][0]["evidence"], [
+            {"path": "plan.blocks[0].name", "value": "宋城"},
+            {"path": "plan.blocks[0].price_known", "value": False},
+            {"path": "plan.blocks[0].options", "value": []}])
+
+    def test_concrete_object_evidence_expands_without_changing_verdict(self):
+        plan = {"blocks": [{"name": "宋城", "note": "闭园", "options": [{"name": "替代地点"}]}]}
+        raw = {"passed": False, "issues": [{"severity": "high", "detail": "地点闭园",
+               "suggestion": "更换地点", "evidence": ["plan.blocks[0]"]}]}
+        client = self.model([json.dumps(raw)])
+        result = validate_plan(plan)
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["issues"][0]["evidence"], [
+            {"path": "plan.blocks[0].name", "value": "宋城"},
+            {"path": "plan.blocks[0].note", "value": "闭园"},
+            {"path": "plan.blocks[0].options[0].name", "value": "替代地点"}])
+        self.assertEqual(client.chat.completions.create.call_count, 1)
+
+    def test_wrong_weather_shape_retry_contains_actual_paths(self):
+        def verdict(path):
+            return {"passed": False, "issues": [{"severity": "high", "type": "天气",
+                    "detail": "暴雨", "suggestion": "换室内活动", "evidence": [path]}]}
+        client = self.model([json.dumps(verdict("search.weather.days[0].weather")),
+                             json.dumps(verdict("search.weather[0].weather"))])
+        result = validate_plan({}, search={"weather": [{"weather": "暴雨"}]})
+        self.assertEqual(result["status"], "blocked")
+        retry = client.chat.completions.create.call_args.kwargs["messages"][-1]["content"]
+        self.assertIn('search.weather.days[0].weather', retry)
+        self.assertIn('search.weather[0].weather', retry)
+        first_prompt = client.chat.completions.create.call_args_list[0].kwargs["messages"][0]["content"]
+        self.assertIn('search.weather[0].weather', first_prompt)
+        self.assertNotIn('search.weather.days[0].weather', first_prompt)
+        self.assertEqual(client.chat.completions.create.call_count, 2)
+
+    def test_bounded_weather_container_resolves_and_large_container_requests_specific_fields(self):
+        raw = {"passed": False, "issues": [{"severity": "high", "type": "天气", "detail": "暴雨",
+               "suggestion": "换室内", "evidence": ["search.weather"]}]}
+        client = self.model([json.dumps(raw)])
+        result = validate_plan({}, search={"weather": [{"weather": "暴雨"}]})
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["issues"][0]["evidence"], [{"path": "search.weather[0].weather", "value": "暴雨"}])
+        self.assertEqual(client.chat.completions.create.call_count, 1)
+        fixed = json.loads(json.dumps(raw))
+        fixed["issues"][0]["evidence"] = ["search.weather[0].weather"]
+        client = self.model([json.dumps(raw), json.dumps(fixed)])
+        result = validate_plan({}, search={"weather": [{"weather": "暴雨"}] * 100})
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(client.chat.completions.create.call_count, 2)
+
+    def test_repeated_missing_path_never_silently_passes(self):
+        raw = {"passed": False, "issues": [{"severity": "high", "detail": "闭园",
+               "suggestion": "替换", "evidence": ["plan.blocks[9].opening_hours"]}]}
+        client = self.model([json.dumps(raw), json.dumps(raw)])
+        result = validate_plan({"blocks": [{"name": "宋城"}]})
+        self.assertEqual(result["status"], "error")
+        self.assertFalse(result["passed"])
+        self.assertEqual(client.chat.completions.create.call_count, 2)
+
+    def test_repeated_truncation_never_accepts_even_an_apparently_complete_verdict(self):
+        complete_looking = SimpleNamespace(choices=[SimpleNamespace(finish_reason="length",
+            message=SimpleNamespace(content='{"passed":true,"issues":[]}'))])
+        with patch("validate.OpenAI") as factory:
+            client = factory.return_value
+            client.chat.completions.create.return_value = complete_looking
+            result = validate_plan({"revision": 3})
+        self.assertFalse(result["passed"])
+        self.assertEqual(result["error"], "模型审核回复被截断")
+        self.assertEqual(client.chat.completions.create.call_count, 2)
+
 
 
 if __name__ == "__main__":

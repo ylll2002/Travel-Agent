@@ -6,7 +6,7 @@ import ts from 'typescript';
 // Run the actual TS module with the existing compiler; no test-framework dependency.
 const source = await readFile(new URL('../src/lib/planReview.ts', import.meta.url), 'utf8');
 const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
-const { confirmationReason, issueTarget, reviewHeading, currentAudit, currentPlanAudit, reviewMessage } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+const { confirmationReason, issueTarget, reviewHeading, currentAudit, currentPlanAudit, reviewMessage, canAutoRepair, advanceReviewProgress } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
 const passed = { schema_version: 1, plan_revision: 4, status: 'passed', passed: true, issues: [] };
 const issue = { severity: 'high', detail: '赶不上列车' };
 
@@ -15,10 +15,11 @@ test('editing a new revision never reuses the preceding passing verdict', () => 
   assert.equal(reviewMessage(currentAudit(passed, 5)), '审核暂未完成，当前版本需要重新审核。');
 });
 
-test('new blocked verdict replaces old success and reports the current problem', () => {
+test('new blocked verdict reports the need to edit without copying problem details into chat', () => {
   const audit = { ...passed, plan_revision: 5, status: 'blocked', passed: false, issues: [issue] };
   assert.equal(currentAudit(audit, 5), audit);
-  assert.equal(reviewMessage(audit), '审核提示：赶不上列车');
+  assert.equal(reviewMessage(audit), '当前行程需要调整，请查看审核窗口的审核结果。');
+  assert.ok(!reviewMessage(audit).includes('赶不上列车'));
 });
 
 test('review failure after successful editing cannot look like a successful review', () => {
@@ -47,7 +48,8 @@ test('contradictory verdict or malformed issues cannot become current review', (
 
 test('non-blocking suggestions belong to the matching new version only', () => {
   const audit = { ...passed, plan_revision: 5, status: 'warning', issues: [{ severity: 'medium', detail: '报价待核实' }] };
-  assert.match(reviewMessage(currentAudit(audit, 5)), /报价待核实/);
+  assert.equal(reviewMessage(currentAudit(audit, 5)), '当前行程已通过审核，核实事项请查看审核窗口。');
+  assert.ok(!reviewMessage(audit).includes('报价待核实'));
   assert.equal(currentAudit(audit, 6), null);
 });
 
@@ -119,4 +121,60 @@ test('review error retains rule issues and retry; pending state hides obsolete f
   assert.match(pending, /正在审核/);
   assert.ok(!pending.includes('赶不上列车'));
   assert.ok(!pending.includes('重试审核'));
+});
+
+
+test('unknown-price suggestion permits confirmation; model failure is a separate reason to retry', () => {
+  const audit = {...passed, status:'warning', passed:true, checks:{rules:'completed',model:'completed'},
+    issues:[{severity:'medium',type:'预算',source:'rule',detail:'报价未知，预订前核实',suggestion:'核实报价',block_ids:[],actionable:false}]};
+  assert.equal(confirmationReason({...reviewed, audit}), '');
+  assert.match(render({...reviewed, audit}), /未知报价仅作核实提示/);
+  assert.notEqual(confirmationReason({...reviewed, audit:{...audit,status:'error',passed:false,error:'模型审核未返回有效JSON'}}), '');
+});
+
+
+test('suggestion details stay in the plan panel while chat only announces the result', () => {
+  const audit = {...passed, status:'warning', issues:[{
+    severity:'medium',type:'偏好',source:'model',block_ids:['v1'],plan_style:'经典',day:1,
+    detail:'餐饮可进一步匹配杭帮菜',suggestion:'选择现有杭帮菜候选',evidence:[],actionable:true,
+  }]};
+  assert.match(render({...reviewed, audit}), /餐饮可进一步匹配杭帮菜/);
+  assert.match(render({...reviewed, audit}), /选择现有杭帮菜候选/);
+  assert.ok(!reviewMessage(audit).includes('杭帮菜'));
+  assert.ok(!reviewMessage(audit).includes('审核建议：'));
+});
+
+
+test('only verified actionable high failures start automatic repair', () => {
+  const bad = {...passed,status:'blocked',passed:false,issues:[{...issue,actionable:true}]};
+  assert.equal(canAutoRepair(bad),true);
+  for (const audit of [null,passed,{...bad,status:'error',error:'timeout'},
+    {...bad,issues:[{...issue,actionable:false}]},{...passed,status:'warning',issues:[{...issue,severity:'medium',actionable:true}]}]) {
+    assert.equal(canAutoRepair(audit),false);
+  }
+});
+
+test('live review keeps failed reasons during repair and hides old verdict on the next snapshot', () => {
+  const bad = {...passed,status:'blocked',passed:false,issues:[{...issue,actionable:true,block_ids:['v1'],suggestion:'提前结束活动'}]};
+  let progress=advanceReviewProgress(null,{stage:'reviewing',plan:{revision:4}});
+  progress=advanceReviewProgress(progress,{stage:'repairing',plan:{revision:4},audit:bad,repair_count:0,repair_limit:2});
+  const html=renderToStaticMarkup(createElement(PlanReviewPanel,{plan:{...reviewed,audit:bad},busy:true,progress,onLocate(){},onRetry(){}}));
+  assert.match(html,/正在自动修复/);
+  assert.match(html,/第 1\/2 次修复/);
+  assert.match(html,/赶不上列车/);
+  progress=advanceReviewProgress(progress,{stage:'reviewing',plan:{revision:5},repair_count:1});
+  assert.equal(progress.entries[1].reasons[0],'赶不上列车');
+  const next=renderToStaticMarkup(createElement(PlanReviewPanel,{plan:{...reviewed,revision:5,audit:null,review_pending:true},busy:true,progress,onLocate(){},onRetry(){}}));
+  assert.match(next,/正在审核/);
+  assert.ok(!next.includes('ta-review-issue-high'));
+  assert.notEqual(confirmationReason({...reviewed,revision:5,audit:null,review_pending:true},true),'');
+});
+
+test('reaching the automatic repair limit never unlocks confirmation', () => {
+  const bad={...passed,status:'blocked',passed:false,issues:[issue]};
+  const progress=advanceReviewProgress(null,{stage:'blocked',plan:{revision:4},audit:bad,repair_count:2,stop_reason:'limit'});
+  const html=renderToStaticMarkup(createElement(PlanReviewPanel,{plan:{...reviewed,audit:bad},busy:false,progress,onLocate(){},onRetry(){},onRepair(){}}));
+  assert.match(html,/已完成 2 次自动修复/);
+  assert.match(html,/再次自动修复/);
+  assert.notEqual(confirmationReason({...reviewed,audit:bad}),'');
 });

@@ -6,9 +6,9 @@ import type { RouteBlock, RouteLeg } from '../components/TripMap';
 import { TripQuestions } from '../components/TripQuestions';
 import type { TripQuestion } from '../components/TripQuestions';
 import { usePlanStream } from '../hooks/usePlanStream';
-import { confirmationReason, currentAudit, issueTarget, reviewMessage } from '../lib/planReview';
-import { PlanReviewPanel } from '../components/PlanReviewPanel';
-import type { AuditIssue, PlanAudit, ReviewContext } from '../lib/planReview';
+import { advanceReviewProgress, canAutoRepair, confirmationReason, currentAudit, issueTarget, reviewMessage } from '../lib/planReview';
+import { PlanReviewWindow } from '../components/PlanReviewWindow';
+import type { AuditIssue, PlanAudit, ReviewContext, ReviewProgress } from '../lib/planReview';
 
 type ChatMessage = {
   id: string;
@@ -472,6 +472,7 @@ export function AgentPage() {
   const committedSearchRef = useRef<Record<string, unknown>>({});
   const requestControllerRef = useRef<(AbortController & { mutation?: boolean }) | null>(null);
   const [planning, setPlanning] = useState(false);
+  const [reviewProgress, setReviewProgress] = useState<ReviewProgress | null>(null);
   const [mapPosition, setMapPosition] = useState(() => {
     if (typeof window === 'undefined') return { x: 760, y: 520 };
 
@@ -514,38 +515,15 @@ export function AgentPage() {
   async function retryReview() {
     if (!routePlan || planning || !routePlan.revision) return;
     const snapshot = routePlan;
-    const controller: AbortController & { mutation?: boolean } = new AbortController();
-    controller.mutation = true;
+    setSelectedBlocks(new Set());
     const version = ++planRequestVersionRef.current;
-    requestControllerRef.current = controller;
-    // Do not restore a failed/obsolete verdict if this review is cancelled.
-    setRoutePlan(prev => prev ? { ...prev, audit: null, review_pending: true } : prev);
     setPlanning(true);
+    addAssistantMessage('正在审核当前行程，发现可修复的问题时将自动调整…');
     try {
-      const raw = await api.reviewPlan({ plan: snapshot, search: committedSearchRef.current }, controller.signal);
-      if (controller.signal.aborted || requestControllerRef.current !== controller || version !== planRequestVersionRef.current) return;
-      const audit = currentAudit(raw.audit, snapshot.revision);
-      if (raw.revision !== snapshot.revision || !audit) throw new Error('审核结果不属于当前行程，请重试。');
-      setRoutePlan(prev => prev && prev.revision === snapshot.revision ? { ...prev, audit, review_pending: false,
-        history: Array.isArray(raw.history) ? raw.history : [],
-        review_context: raw.review_context as ReviewContext | undefined ?? prev.review_context } : prev);
-      addAssistantMessage(reviewMessage(audit));
-    } catch (error) {
-      if (!controller.signal.aborted && requestControllerRef.current === controller && version === planRequestVersionRef.current) {
-        const reason = error instanceof Error ? error.message : String(error);
-        const previous = currentAudit(snapshot.audit, snapshot.revision);
-        setRoutePlan(prev => prev && prev.revision === snapshot.revision ? { ...prev, review_pending: false,
-          audit: { schema_version: 1, plan_revision: snapshot.revision!, status: 'error', passed: false,
-            error: reason, issues: previous?.issues.filter(issue => issue.source === 'rule') ?? [],
-            rule_summary: previous?.rule_summary } } : prev);
-        addAssistantMessage(`审核未完成：${reason}。现有行程已保留。`);
-      }
+      const audit = await repairCurrentSnapshot(snapshot, committedSearchRef.current, version);
+      if (version === planRequestVersionRef.current) updateLastAssistantMessage(reviewMessage(audit));
     } finally {
-      if (requestControllerRef.current === controller && version === planRequestVersionRef.current) {
-        setRoutePlan(prev => prev ? { ...prev, review_pending: false } : prev);
-        requestControllerRef.current = null;
-        setPlanning(false);
-      }
+      if (version === planRequestVersionRef.current) setPlanning(false);
     }
   }
 
@@ -679,116 +657,113 @@ export function AgentPage() {
     }
   }
 
+  function publishPlanSnapshot(raw: Record<string, unknown>, pending: boolean): RoutePlan | null {
+    const plan = (raw.plan ?? raw) as Record<string, unknown>;
+    if (!Array.isArray(plan.blocks) || plan.error || !Number.isSafeInteger(plan.revision) || Number(plan.revision) < 1) return null;
+    const plans = Array.isArray(plan.plans) ? plan.plans as Array<{style:string;summary?:string}> : [];
+    const styles = plans.map(p => p.style).filter(Boolean);
+    const snapshot: RoutePlan = {
+      revision: typeof plan.revision === 'number' ? plan.revision : undefined,
+      audit: pending ? null : currentAudit(raw.audit ?? plan.audit, plan.revision), review_pending: pending,
+      history: Array.isArray(raw.history) ? raw.history as Array<Record<string, unknown>> : [],
+      review_context: raw.review_context as ReviewContext | undefined ?? routePlan?.review_context,
+      basic: plan.basic as Record<string,unknown> | undefined ?? routePlan?.basic,
+      destination: String(plan.destination ?? routePlan?.destination ?? ''),
+      start_date: String(plan.start_date ?? routePlan?.start_date ?? ''),
+      end_date: String(plan.end_date ?? routePlan?.end_date ?? ''),
+      styles: styles.length ? styles : routePlan?.styles ?? [],
+      summaries: plans.length ? Object.fromEntries(plans.map(p => [p.style, p.summary ?? ''])) : routePlan?.summaries ?? {},
+      blocks: plan.blocks as RouteBlock[], legs: Array.isArray(plan.legs) ? plan.legs as RouteLeg[] : [],
+      total_cost: plan.total_cost as number | undefined, budget_status: plan.budget_status as string | undefined,
+      cost_by_style: plan.cost_by_style as RoutePlan['cost_by_style'], budget_by_style: plan.budget_by_style as RoutePlan['budget_by_style'],
+      unpriced_items: plan.unpriced_items as RoutePlan['unpriced_items'], suggestions: plan.suggestions as PlanSuggestions | undefined,
+    };
+    setRoutePlan(snapshot);
+    setConfirmedStyle(null);
+    setSaveState('idle');
+    if (raw.search && typeof raw.search === 'object') {
+      committedSearchRef.current = raw.search as Record<string,unknown>;
+      applySearchData(committedSearchRef.current);
+    }
+    return snapshot;
+  }
+
+  function receiveWorkflowEvent(data: Record<string, unknown>) {
+    setReviewProgress(previous => advanceReviewProgress(previous, data));
+    if (data.plan) {
+      const snapshot = publishPlanSnapshot(data, data.stage === 'reviewing');
+      if (snapshot) setActiveStyle(previous => snapshot.styles.includes(previous) ? previous : snapshot.styles[0] ?? '');
+    }
+    else if (data.search) applySearchData(data.search as Record<string,unknown>);
+  }
+
+  function workflowFailed(error: string) {
+    setReviewProgress(previous => advanceReviewProgress(previous, {stage:'error',error}));
+    setRoutePlan(previous => previous ? {...previous, review_pending:false, audit:{
+      schema_version:1,plan_revision:previous.revision!,status:'error',passed:false,error,
+      issues:previous.audit?.issues.filter(issue => issue.source === 'rule') ?? [],
+      rule_summary:previous.audit?.rule_summary,
+    }} : previous);
+  }
+
+  async function repairCurrentSnapshot(snapshot: RoutePlan, search: Record<string, unknown>, version: number): Promise<PlanAudit | null> {
+    let finalAudit: PlanAudit | null = null;
+    setRoutePlan({...snapshot, audit:null, review_pending:true});
+    setReviewProgress(advanceReviewProgress(null, {stage:'reviewing',repair_count:0,plan:snapshot}));
+    await startPlanStream({plan:snapshot,search}, event => {
+      if (version !== planRequestVersionRef.current) return;
+      if (event.type === 'node') receiveWorkflowEvent(event.data);
+      else if (event.type === 'error') workflowFailed(event.error);
+      else {
+        const raw = event.data;
+        if (typeof raw.error === 'string') {workflowFailed(raw.error); return;}
+        const current = publishPlanSnapshot(raw, false);
+        finalAudit = current?.audit ?? null;
+        if (!finalAudit) { workflowFailed('当前版本没有有效审核结论，请重试。'); return; }
+        const workflow = raw.workflow as Record<string,unknown> | undefined;
+        setReviewProgress(previous => advanceReviewProgress(previous, {stage:finalAudit?.status ?? 'error',
+          plan:current,audit:finalAudit,...workflow,repair_count:workflow?.repair_count}));
+      }
+    }, '/plan/repair/stream');
+    return finalAudit;
+  }
+
   async function runPlan(payload: Record<string, unknown>) {
     const version = ++planRequestVersionRef.current;
     setPlanning(true);
-    await startPlanStream(
-      payload,
-      (event) => {
-        if (version !== planRequestVersionRef.current) return;
-        if (event.type === 'node') {
-          const nodeData = event.data as { node?: unknown; search?: unknown };
-          const node = String(nodeData.node ?? '');
-          if (node === 'search' && nodeData.search) {
-            applySearchData(nodeData.search as Record<string, unknown>);
-          }
-          const status =
-            node === 'search'
-              ? '已找到机票、酒店、景点、活动等信息，正在生成方案…'
-              : node === 'prepare_memory'
-                ? '正在读取你的偏好和历史行程…'
-              : node === 'plan'
-                ? '正在安排景点，并搜索餐点附近的餐厅…'
-                : node === 'validate'
-                  ? '正在审核方案…'
-                  : '正在处理…';
-          updateLastAssistantMessage(status);
-          return;
-        }
-
-        if (event.type === 'error') {
-          updateLastAssistantMessage(`规划失败：${event.error}`);
-          return;
-        }
-
-        const raw = event.data ?? {};
-        if (typeof raw.error === 'string') {
-          updateLastAssistantMessage(`规划失败：${raw.error}`);
-          return;
-        }
-        const plan = (raw.plan ?? {}) as {
-          revision?: number;
-          basic?: Record<string, unknown>;
-          destination?: string;
-          start_date?: string;
-          end_date?: string;
-          plans?: Array<{ style?: string; summary?: string }>;
-          blocks?: RouteBlock[];
-          legs?: RouteLeg[];
-          total_cost?: number;
-          budget_status?: string;
-          cost_by_style?: Record<string, number>;
-          budget_by_style?: Record<string, string>;
-          unpriced_items?: Record<string, string[]>;
-          food_warnings?: string[];
-          warnings?: string[];
-          suggestions?: PlanSuggestions;
-          error?: string;
-        };
-        if (plan.error) {
-          updateLastAssistantMessage(`规划失败：${plan.error}`);
-          return;
-        }
-
-        const styles = (plan.plans ?? []).map((p) => p.style ?? '').filter(Boolean);
-        const summaries: Record<string, string> = {};
-        for (const p of plan.plans ?? []) {
-          if (p.style) summaries[p.style] = p.summary ?? '';
-        }
-        const blocks = plan.blocks ?? [];
-        const legs = plan.legs ?? [];
-        const audit = currentAudit(raw.audit, plan.revision);
-        setRoutePlan({
-          revision: plan.revision, audit, review_pending: false,
-          history: Array.isArray(raw.history) ? raw.history : [],
-          review_context: raw.review_context as ReviewContext | undefined,
-          basic: plan.basic,
-          destination: plan.destination ?? '',
-          start_date: plan.start_date ?? '',
-          end_date: plan.end_date ?? '',
-          styles,
-          summaries,
-          blocks,
-          legs,
-          total_cost: plan.total_cost,
-          budget_status: plan.budget_status,
-          cost_by_style: plan.cost_by_style,
-          budget_by_style: plan.budget_by_style,
-          unpriced_items: plan.unpriced_items,
-          suggestions: plan.suggestions,
-        });
-        setActiveStyle(styles[0] ?? '');
-        setActiveDay('all');
-        setExpandedStyle(null);
-        setConfirmedStyle(null);
-        setPlanRating(null);
-        setPlanFeedback('');
-        setSaveState('idle');
-        setSelectedBlocks(new Set());
-
-        committedSearchRef.current = (raw.search ?? {}) as Record<string, unknown>;
-        applySearchData(committedSearchRef.current);
-        setPlanItemIds([]);
-        setDetailItem(null);
-
-        const located = blocks.filter((b) => b.lng != null).length;
-        const review = reviewMessage(audit);
-        const message = legs.length > 0
-            ? `已为「${plan.destination}」生成 ${styles.length} 个方案，右上地图展示了 ${located} 个地点和 ${legs.length} 段真实路线。`
-            : `已为「${plan.destination}」生成行程。地图显示已定位地点，暂未获取到详细交通路线。`;
-        updateLastAssistantMessage([message, review, ...(plan.warnings ?? []).slice(0, 3), ...(plan.food_warnings ?? []).slice(0, 2)].filter(Boolean).join('\n'));
-      },
-    ).finally(() => {
+    setReviewProgress(advanceReviewProgress(null, {stage:'planning',repair_count:0}));
+    setRoutePlan(previous => previous ? {...previous,audit:null,review_pending:true} : previous);
+    setExpandedStyle(null);
+    setSelectedBlocks(new Set());
+    await startPlanStream(payload, event => {
+      if (version !== planRequestVersionRef.current) return;
+      if (event.type === 'node') { receiveWorkflowEvent(event.data); return; }
+      if (event.type === 'error') {
+        workflowFailed(event.error);
+        updateLastAssistantMessage('本次处理未完成，现有行程已保留，请查看审核窗口。');
+        return;
+      }
+      const raw = event.data;
+      const plan = (raw.plan ?? {}) as Record<string,unknown>;
+      if (typeof raw.error === 'string' || typeof plan.error === 'string') {
+        workflowFailed(String(raw.error ?? plan.error));
+        updateLastAssistantMessage('本次处理未完成，请查看审核窗口后重试。');
+        return;
+      }
+      const snapshot = publishPlanSnapshot(raw,false);
+      if (!snapshot || !snapshot.audit) {workflowFailed('未收到完整行程和有效审核结论，请重试。'); return;}
+      const workflow = raw.workflow as Record<string,unknown> | undefined;
+      setReviewProgress(previous => advanceReviewProgress(previous, {stage:snapshot.audit?.status ?? 'error',plan:snapshot,
+        audit:snapshot.audit,...workflow,repair_count:workflow?.repair_count}));
+      setActiveStyle(snapshot.styles[0] ?? '');
+      setActiveDay('all');
+      setPlanRating(null);
+      setPlanFeedback('');
+      setPlanItemIds([]);
+      setDetailItem(null);
+      const located = snapshot.blocks.filter(b => b.lng != null).length;
+      updateLastAssistantMessage(`已为「${snapshot.destination}」生成 ${snapshot.styles.length} 个方案，地图展示了 ${located} 个地点和 ${snapshot.legs.length} 段路线。\n${reviewMessage(snapshot.audit ?? null)}`);
+    }).finally(() => {
       if (version === planRequestVersionRef.current) setPlanning(false);
     });
   }
@@ -801,6 +776,7 @@ export function AgentPage() {
     requestControllerRef.current = controller;
     setRoutePlan((prev) => prev ? { ...prev, review_pending: true } : prev);
     setPlanning(true);
+    setReviewProgress(advanceReviewProgress(null, {stage:'planning'}));
     try {
       const userId = localStorage.getItem('currentUser') || '';
       let profile: unknown = null;
@@ -838,29 +814,10 @@ export function AgentPage() {
         throw new Error(raw.error);
       }
       if (!Array.isArray(raw.blocks)) throw new Error('没有收到更新后的计划，请重试。');
-      const audit = currentAudit(raw.audit, raw.revision);
-      const newBlocks = raw.blocks as RouteBlock[];
-      const plans = Array.isArray(raw.plans) ? raw.plans as Array<{ style: string; summary: string }> : [];
-      const styles = plans.map((item) => item.style).filter(Boolean);
-      setRoutePlan((prev) => prev ? {
-        ...prev,
-        revision: typeof raw.revision === 'number' ? raw.revision : undefined,
-        audit, review_pending: false,
-        history: Array.isArray(raw.history) ? raw.history : [],
-        review_context: raw.review_context as ReviewContext | undefined,
-        basic: raw.basic as Record<string, unknown> | undefined ?? prev.basic,
-        destination: String(raw.destination ?? prev.destination),
-        start_date: String(raw.start_date ?? prev.start_date),
-        end_date: String(raw.end_date ?? prev.end_date),
-        blocks: newBlocks,
-        legs: Array.isArray(raw.legs) ? raw.legs as RouteLeg[] : [],
-        ...(styles.length ? { styles, summaries: Object.fromEntries(plans.map((item) => [item.style, item.summary])) } : {}),
-        total_cost: typeof raw.total_cost === 'number' ? raw.total_cost : prev.total_cost,
-        budget_status: String(raw.budget_status ?? prev.budget_status ?? ''),
-        cost_by_style: raw.cost_by_style as RoutePlan['cost_by_style'] ?? prev.cost_by_style,
-        budget_by_style: raw.budget_by_style as RoutePlan['budget_by_style'] ?? prev.budget_by_style,
-        unpriced_items: raw.unpriced_items as RoutePlan['unpriced_items'] ?? prev.unpriced_items,
-      } : prev);
+      let audit = currentAudit(raw.audit, raw.revision);
+      const editedSnapshot = publishPlanSnapshot(raw, false);
+      if (!editedSnapshot) throw new Error('没有收到完整的新行程，请重试。');
+      setReviewProgress(advanceReviewProgress(null, {stage:audit?.status ?? 'error',plan:editedSnapshot,audit}));
       const updatedSearch = raw.search && typeof raw.search === 'object' ? raw.search as Record<string, unknown> : committedSearchRef.current;
       committedSearchRef.current = { ...updatedSearch,
         ...(Array.isArray(raw.food) ? { food: raw.food } : {}),
@@ -878,11 +835,15 @@ export function AgentPage() {
       setSelectedBlocks(new Set());
       setConfirmedStyle(null);
       setSaveState('idle');
-      const timingWarnings = Array.isArray(raw.travel_time_warnings) ? raw.travel_time_warnings.filter((item): item is string => typeof item === 'string') : [];
-      updateLastAssistantMessage([successMessage, reviewMessage(audit), ...timingWarnings.slice(0, 3)].join('\n'));
+      if (canAutoRepair(audit)) {
+        audit = await repairCurrentSnapshot(editedSnapshot, committedSearchRef.current, version);
+        if (controller.signal.aborted || version !== planRequestVersionRef.current) return false;
+      }
+      updateLastAssistantMessage([successMessage, reviewMessage(audit)].join('\n'));
       return true;
     } catch (error) {
       if ((error as Error).name === 'AbortError' || controller.signal.aborted || requestControllerRef.current !== controller || version !== planRequestVersionRef.current) return false;
+      workflowFailed(error instanceof Error ? error.message : String(error));
       updateLastAssistantMessage(
         `修改失败：${error instanceof Error ? error.message : String(error)}`,
       );
@@ -1121,6 +1082,7 @@ export function AgentPage() {
     requestControllerRef.current?.abort();
     stopPlanStream();
     setPlanning(false);
+    setReviewProgress(previous => advanceReviewProgress(previous, {stage:'cancelled'}));
     addAssistantMessage('已停止本次处理。你可以继续补充或调整需求。');
   }
 
@@ -1239,7 +1201,6 @@ export function AgentPage() {
   }
 
   function chooseStyle(style: string) {
-    if (planning) return;
     setActiveStyle(style);
     setExpandedStyle(style);
     setActiveDay('all');
@@ -1646,8 +1607,6 @@ export function AgentPage() {
 
         {/* 中间：旅行计划 */}
         <section className="ta-plan-card ta-plan-column">
-          {routePlan && <PlanReviewPanel plan={routePlan} busy={planning}
-            onLocate={locateReviewIssue} onRetry={() => void retryReview()} />}
           {expandedStyle && routePlan ? (
             <div className="ta-plan-detail">
               <button type="button" className="ta-plan-detail-back" onClick={() => setExpandedStyle(null)}>
@@ -1912,7 +1871,6 @@ export function AgentPage() {
                             } as CSSProperties)
                           : undefined
                       }
-                      disabled={planning}
                       onClick={() => chooseStyle(style)}
                     >
                       <span className="ta-plan-style-name">{style}</span>
@@ -2097,6 +2055,10 @@ export function AgentPage() {
       </div>
 
       {/* 悬浮地图：拖动标题栏可以自由移动 */}
+      {(routePlan || reviewProgress) && <PlanReviewWindow
+        plan={routePlan ?? {blocks:[],review_pending:planning}} busy={planning} progress={reviewProgress}
+        onLocate={locateReviewIssue} onRetry={() => void retryReview()} onRepair={() => void retryReview()} />}
+
       {isMapHidden && (
         <button
           type="button"

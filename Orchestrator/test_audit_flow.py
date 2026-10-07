@@ -52,12 +52,12 @@ class AuditFlowTests(unittest.TestCase):
         self.assertEqual(result["audit"]["issues"], normalize_audit({"passed": True, "issues": [medium]})["issues"])
         self.assertEqual([entry["passed"] for entry in result["history"]], [False, True])
 
-    def test_unresolved_hard_budget_failure_stops_after_second_audit(self):
+    def test_unresolved_hard_budget_failure_stops_after_two_repairs(self):
         audit = {"passed": False, "issues": [high_issue("预算")], "feedback": "总费用超预算"}
-        result, _ = self.execute([audit, audit])
-        self.assertEqual(result["iteration"], 2)
+        result, _ = self.execute([audit, audit, audit])
+        self.assertEqual(result["iteration"], 3)
         self.assertIs(result["audit"]["passed"], False)
-        self.assertEqual(len(result["history"]), 2)
+        self.assertEqual(len(result["history"]), 3)
 
     def test_medium_only_false_is_retained_without_replanning(self):
         audit = {"passed": False, "issues": [{"severity": "medium", "detail": "报价未知", "suggestion": "核实报价"}]}
@@ -189,12 +189,15 @@ class EditedPlanAuditTests(unittest.TestCase):
             result = flow.build_graph().invoke(data, {"configurable": {"thread_id": "modified-review"}})
         return result, calls
 
-    def test_modification_enters_review_and_does_not_automatically_rewrite_choice(self):
+    def test_modification_enters_review_and_can_automatically_repair_failures(self):
         result, calls = self.execute()
-        self.assertEqual([script for script, _ in calls].count(flow.PLAN_PY), 1)
-        self.assertEqual([script for script, _ in calls].count(flow.VALIDATE_PY), 1)
-        self.assertEqual(result["plan"]["revision"], 5)
-        self.assertEqual(result["audit"]["plan_revision"], 5)
+        self.assertEqual([script for script, _ in calls].count(flow.PLAN_PY), 3)
+        self.assertEqual([script for script, _ in calls].count(flow.VALIDATE_PY), 3)
+        self.assertEqual(result["plan"]["revision"], 7)
+        self.assertEqual(result["audit"]["plan_revision"], 7)
+        repairs = [payload for script, payload in calls if script == flow.PLAN_PY][1:]
+        self.assertTrue(all(payload.get("audit_repair") for payload in repairs))
+        self.assertTrue(all("modify" not in payload for payload in repairs))
         self.assertEqual(result["audit"]["status"], "blocked")
         self.assertNotIn("audit", result["plan"])
 

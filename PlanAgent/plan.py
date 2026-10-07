@@ -46,6 +46,7 @@ ROOT = BASE_DIR.parent
 sys.path.insert(0, str(ROOT))
 from shared.sources import merge_plan_sources
 from shared.audit import without_review
+from shared.route_timing import LOCAL_TRANSFER_PADDING_S, MODE_LABELS
 
 SEARCH_PY = ROOT / "SearchAgent" / "search.py"
 SEARCH_PYTHON = ROOT / "SearchAgent" / ".venv" / "bin" / "python"
@@ -3157,6 +3158,126 @@ def _align_modified_trip(result: dict, trip_context: dict, original: dict) -> di
     return aligned
 
 
+def _compact_repair_plan(plan: dict) -> dict:
+    """Do not ask the model to copy routes, URLs, restaurant options or audit data."""
+    item_fields = ("id", "name", "type", "time", "note", "meal", "lng", "lat",
+                   "unit_price", "price", "price_basis", "price_known",
+                   "user_selected", "user_added", "locked")
+    result = {key: deepcopy(plan[key]) for key in ("destination", "start_date", "end_date", "days", "basic") if key in plan}
+    result["plans"] = []
+    for style in plan.get("plans") or []:
+        days = []
+        for day in style.get("itinerary") or []:
+            value = {key: deepcopy(day[key]) for key in ("day", "date", "theme", "activity_window", "weather") if key in day}
+            value["schedule"] = [{key: deepcopy(item[key]) for key in item_fields if key in item}
+                                 for item in day.get("schedule") or []]
+            days.append(value)
+        result["plans"].append({"style": style["style"], "itinerary": days})
+    return result
+
+
+def _valid_modified_plan(value: object, expected: dict | None = None) -> bool:
+    if not isinstance(value, dict) or not isinstance(value.get("plans"), list) or not value["plans"]:
+        return False
+    actual = {}
+    seen_ids = set()
+    for style in value["plans"]:
+        if not isinstance(style, dict) or not isinstance(style.get("style"), str) or not style["style"]:
+            return False
+        if style["style"] in actual or not isinstance(style.get("itinerary"), list):
+            return False
+        days = set()
+        for day in style["itinerary"]:
+            if not isinstance(day, dict) or type(day.get("day")) is not int or day["day"] < 1 or day["day"] in days:
+                return False
+            if not isinstance(day.get("schedule"), list) or any(not isinstance(item, dict) for item in day["schedule"]):
+                return False
+            if expected is not None:
+                for item in day["schedule"]:
+                    if any(not isinstance(item.get(key), str) or not item[key] for key in ("name", "type")):
+                        return False
+                    if not isinstance(item.get("time"), str):
+                        return False
+                    identifier = item.get("id")
+                    if identifier is not None:
+                        if not isinstance(identifier, str) or not identifier or identifier in seen_ids:
+                            return False
+                        seen_ids.add(identifier)
+            days.add(day["day"])
+        actual[style["style"]] = days
+    if expected is None:
+        return True
+    required = {style["style"]: {day["day"] for day in style["itinerary"]} for style in expected["plans"]}
+    return actual == required
+
+
+def _modified_plan_reply(client, messages: list[dict], *, repairing=False, expected=None) -> dict:
+    """Retry an invalid repair reply once; never accept partial JSON as a plan."""
+    request_messages = deepcopy(messages)
+    reason = "规划模型没有返回完整日程"
+    for attempt in range(2 if repairing else 1):
+        try:
+            resp = _chat_completion(client, model=os.getenv("OPENAI_MODEL", "qwen3.8-27b"),
+                                    messages=request_messages, response_format={"type": "json_object"},
+                                    max_tokens=16000, timeout=120 if repairing else 300)
+        except json.JSONDecodeError:
+            reason = "规划服务返回的 JSON 格式无效"
+        else:
+            choice = resp.choices[0] if resp.choices else None
+            content = getattr(getattr(choice, "message", None), "content", None)
+            if getattr(choice, "finish_reason", None) == "length":
+                reason = "规划模型的回复被截断"
+            elif getattr(choice, "finish_reason", None) == "content_filter" or not isinstance(content, str) or not content.strip():
+                reason = "规划模型没有返回有效内容"
+            else:
+                content = content.strip()
+                fence = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", content, flags=re.S | re.I)
+                if fence:
+                    content = fence[1]
+                try:
+                    def reject_constant(value):
+                        raise ValueError("non-finite JSON number")
+                    result = json.loads(content, parse_constant=reject_constant)
+                except (json.JSONDecodeError, ValueError):
+                    reason = "规划模型返回的 JSON 格式无效"
+                else:
+                    if _valid_modified_plan(result, expected):
+                        return result
+                    reason = "规划模型返回的日程结构不完整"
+        if attempt == 0 and repairing:
+            # Do not put the long, invalid response back into the context.
+            request_messages = deepcopy(messages) + [{"role": "user", "content":
+                reason + "。请重新生成完整有效的 JSON；只返回要求的 plans、style、itinerary、day、schedule，"
+                "活动仅含 id、name、type、time、note。每个原方案和日期都必须保留，未改变的活动也要列出。"
+                "不要复述路线、报价、链接、候选选项或其他外层字段；禁止省略号和 JSON 之外的解释。"}]
+    return {"error": reason + "，原行程已保留，请重试。"}
+
+
+def _restore_repair_metadata(result: dict, original: dict) -> dict:
+    """Merge the compact schedule into trusted records, preserving unchanged places."""
+    restored = deepcopy(original)
+    restored.pop("blocks", None)
+    styles = {style["style"]: style for style in restored["plans"]}
+    for proposal in result["plans"]:
+        previous = styles[proposal["style"]]
+        items = [item for day in previous["itinerary"] for item in day.get("schedule") or []]
+        by_id = {str(item["id"]): item for item in items if item.get("id")}
+        days = {day["day"]: day for day in previous["itinerary"]}
+        for proposed_day in proposal["itinerary"]:
+            schedule = []
+            for proposed_item in proposed_day["schedule"]:
+                edit = {key: deepcopy(proposed_item[key]) for key in ("id", "name", "type", "time", "note") if key in proposed_item}
+                old = by_id.get(str(edit.get("id"))) or next((item for item in days[proposed_day["day"]]["schedule"]
+                      if item.get("name") == edit["name"] and item.get("type") == edit["type"]), {})
+                same_place = old.get("name") == edit["name"] and old.get("type") == edit["type"]
+                item = {**(deepcopy(old) if same_place else {}), **edit}
+                if old.get("id"):
+                    item["id"] = old["id"]
+                schedule.append(item)
+            days[proposed_day["day"]]["schedule"] = schedule
+    return restored
+
+
 def modify_plan(
     plan: dict,
     modify: dict,
@@ -3199,6 +3320,9 @@ def modify_plan(
 
     # 传给 LLM 的 plan 只保留嵌套 plans，去掉扁平 blocks，避免结构混淆
     llm_plan = _align_modified_trip(plan, trip_context, plan)
+    repairing = bool(modify.get("audit_repair"))
+    if repairing:
+        llm_plan = _compact_repair_plan(llm_plan)
 
     context: dict = {"plan": llm_plan, "modify": modify}
     if search_result:
@@ -3208,29 +3332,27 @@ def modify_plan(
     if basic:
         context["basic"] = basic
 
-    resp = _chat_completion(client,
-        model=os.getenv("OPENAI_MODEL", "qwen3.8-27b"),
-        messages=[
-            {"role": "system", "content": MODIFY_PLAN_PROMPT +
+    prompt = ("你是旅行行程修复助手，根据 modify.instruction 修复已核实的严重问题。"
+              "只返回 JSON 对象 {\"plans\":[{\"style\":\"原方案名\",\"itinerary\":[{\"day\":1,"
+              "\"schedule\":[{\"id\":\"原活动id\",\"name\":\"名称\",\"type\":\"景点\","
+              "\"time\":\"09:00-11:00\",\"note\":\"简短说明\"}]}]}]}。"
+              "保留所有原方案、日期和未改变的活动，原活动id不可改；必要时调整后续时间或减少活动。"
+              "不要输出外层计划、路线、报价、链接、餐厅选项或审核字段，这些由程序保留和重算。"
+              if repairing else MODIFY_PLAN_PROMPT)
+    messages = [
+            {"role": "system", "content": prompt +
              "输入plan中的日期、days及basic已按用户明确要求校验。必须按这些日期和天数安排每一天，"
              "不要自行更改目的地、人数或预算；增加天数时请使用检索中的真实候选安排新增日期。"
              "不得猜测或降低未改地点的价格；没有检索报价的新增地点价格留空。保留用户手选或锁定的餐厅酒店。"},
             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
-        ],
-        response_format={"type": "json_object"},
-        max_tokens=16000,
-        timeout=300,
-    )
-    content = (resp.choices[0].message.content or "{}").strip()
-    if content.startswith("```"):
-        content = content.strip("`")
-        if content.startswith("json"):
-            content = content[4:]
-    result = json.loads(content)
-    if not isinstance(result, dict) or not isinstance(result.get("plans"), list):
-        return {"error": "调整未返回完整日程，请重试"}
+        ]
+    result = _modified_plan_reply(client, messages, repairing=repairing, expected=llm_plan if repairing else None)
+    if result.get("error"):
+        return result
+    if repairing:
+        result = _restore_repair_metadata(result, _align_modified_trip(plan, trip_context, plan))
     return _guard_global_plan_quotes(_align_modified_trip(result, trip_context, plan), plan,
-                                    search_result or {}, modify.get("instruction") or "")
+                                    search_result or {}, "" if modify.get("audit_repair") else modify.get("instruction") or "")
 
 
 TYPE_KEYWORDS = (
@@ -3494,7 +3616,11 @@ def _align_route_times(plan: dict, adjust: bool = False) -> None:
         duration = _positive_food_number(leg.get("duration_s"))
         if not before or not after or duration is None:
             continue
-        transfer = math.ceil(duration / 60) + 5
+        transfer = math.ceil(duration / 60) + LOCAL_TRANSFER_PADDING_S // 60
+        if leg.get("selection_reason"):
+            note = f"此段需{MODE_LABELS.get(leg.get('mode'), '按地图路线')}，约{math.ceil(duration / 60)}分钟转场"
+            if note not in (target.get("note") or ""):
+                target["note"] = (target.get("note") or "") + "；" + note
         earliest = before[1] + transfer
         if after[0] >= earliest:
             continue
@@ -3507,7 +3633,8 @@ def _align_route_times(plan: dict, adjust: bool = False) -> None:
             target["time"] = f"{_clock(earliest)}-{_clock(earliest + length)}"
             target["note"] = (target.get("note") or "") + f"；已预留约{transfer}分钟转场"
         else:
-            warnings.append(f"第{target.get('day')}天从{origin.get('name')}到{target.get('name')}需约{transfer}分钟转场，当前时间不足，请调整用餐或游览时间。")
+            mode = MODE_LABELS.get(leg.get("mode"), "当前路线")
+            warnings.append(f"第{target.get('day')}天从{origin.get('name')}到{target.get('name')}按{mode}需约{transfer}分钟转场，当前时间不足，请核实其他路线或调整用餐、游览时间。")
     old_warnings = set(plan.get("travel_time_warnings") or [])
     plan["warnings"] = [warning for warning in plan.get("warnings") or [] if warning not in old_warnings] + warnings
     plan["travel_time_warnings"] = warnings
@@ -3548,6 +3675,38 @@ def finalize_plan(plan: dict, search_result: dict | None = None, basic: dict | N
     return rebuild_itineraries(result)
 
 
+
+def repair_plan(plan: dict, issues: list, search_result: dict | None = None,
+                profile: dict | None = None, basic: dict | None = None) -> dict:
+    """Repair the latest snapshot, keeping fixed trip constraints and other styles."""
+    from shared.audit import repair_feedback
+    original = rebuild_itineraries(without_review(plan))
+    basic = deepcopy(basic or original.get("basic") or {})
+    feedback = repair_feedback({"passed": False, "issues": issues})
+    if not feedback:
+        return {"error": "没有可自动修复的严重问题"}
+    context = resolve_trip_changes("", basic, original.get("start_date") or "",
+                                   original.get("end_date") or original.get("start_date") or "")
+    repaired = modify_plan(original, {"mode": "global", "audit_repair": True, "instruction": feedback,
+                          "_trip_context": context}, search_result, profile, basic)
+    if repaired.get("error"):
+        return repaired
+    affected = {i.get("plan_style") for i in issues if i.get("severity") == "high" and i.get("actionable")}
+    replacements = {p.get("style"): p for p in repaired.get("plans") or []}
+    styles = [p.get("style") for p in original.get("plans") or []]
+    target_styles = set(styles) if None in affected else affected
+    if any(style not in replacements for style in target_styles):
+        return {"error": "自动修复未返回完整方案，原行程已保留"}
+    repaired = {**original, **repaired}
+    repaired["plans"] = [deepcopy(replacements[p.get("style")] if p.get("style") in target_styles else p)
+                         for p in original.get("plans") or []]
+    repaired.update(destination=original.get("destination"), start_date=context["start_date"],
+                    end_date=context["end_date"], basic=basic)
+    repaired["blocks"] = blockify(repaired)
+    targets = [{"plan_style": style, "day": day.get("day")} for p in repaired["plans"]
+               if (style := p.get("style")) in target_styles for day in p.get("itinerary") or []]
+    return finalize_plan(repaired, search_result, basic, refresh_food=True, refresh_food_targets=targets)
+
 def main() -> None:
     if not sys.stdin.isatty():
         raw = sys.stdin.read().strip()
@@ -3564,6 +3723,11 @@ def main() -> None:
 
     try:
         data = json.loads(raw)
+        if isinstance(data, dict) and data.get("audit_repair"):
+            result = repair_plan(data.get("plan") or {}, data.get("repair_issues") or [],
+                                 data.get("search"), data.get("profile"), data.get("basic"))
+            print(json.dumps(result, ensure_ascii=False))
+            return
         if isinstance(data, dict) and data.get("finalize"):
             result = finalize_plan(
                 data.get("plan") or {}, data.get("search"), data.get("basic"),

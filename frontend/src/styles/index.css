@@ -5710,5 +5710,19 @@ button:disabled {
 .ta-plan-block.ta-review-highlight { outline: 3px solid #d38a1b; outline-offset: -3px; background: #fff6df; }
 .ta-review-confirm-hint { margin: 6px 0 0; font-size: 12px; color: #8a4024; }
 
-.ta-plan-column > .ta-review { max-height: 45%; overflow-y: auto; }
+
 .ta-plan-column > .ta-plan-detail { flex: 1 1 0; height: auto; }
+
+
+.ta-floating-review { position:fixed; z-index:121; width:min(380px,calc(100vw - 24px)); max-height:min(360px,calc((100dvh - 100px)/2)); display:flex; flex-direction:column; overflow:hidden; border:1px solid #dce2ed; border-radius:16px; background:rgba(255,255,255,.98); box-shadow:0 8px 28px rgba(30,42,72,.14); }
+.ta-floating-review.expanded { width:min(620px,calc(100vw - 24px)); max-height:calc(100dvh - 92px); }
+.ta-floating-review > .ta-floating-map-handle { flex-shrink:0; padding:8px 12px; touch-action:none; }
+.ta-floating-review-actions, .ta-floating-review .ta-floating-map-actions { gap:6px; }
+.ta-floating-review .ta-floating-map-actions button { border:1px solid #dce2ed; background:#fff; border-radius:8px; padding:4px 8px; color:#53647d; cursor:pointer; }
+.ta-floating-review-body { min-height:0; overflow:auto; padding:8px; }
+.ta-floating-review-body .ta-review { margin:0; }
+.ta-floating-review-body .ta-review-issues { max-height:none; overflow:visible; }
+.ta-review-timeline ol { margin:4px 0; padding-left:20px; font-size:12px; }
+.ta-review-timeline li { padding:4px 0; border-top:1px solid #e1e5ed; }
+.ta-review-side-tab { position:fixed; right:0; top:96px; z-index:122; background:#fff; color:#4f63dd; border:1px solid #dce2ed; border-radius:10px 0 0 10px; padding:10px 12px; box-shadow:0 4px 16px #23354a15; cursor:pointer; }
+@media(max-width:640px) { .ta-floating-review { max-height:calc((100dvh - 100px)/2); } }

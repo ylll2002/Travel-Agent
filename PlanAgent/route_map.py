@@ -10,6 +10,7 @@ import json
 import math
 import os
 import ssl
+import sys
 import threading
 import time
 import urllib.parse
@@ -18,6 +19,9 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import certifi
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from shared.route_timing import LOCAL_TRANSFER_PADDING_S, route_seconds
 
 AMAP_BASE = "https://restapi.amap.com"
 CACHE_PATH = Path(__file__).resolve().parent / "route_cache.json"
@@ -224,6 +228,44 @@ def route_leg(a: dict, b: dict) -> dict | None:
     return leg
 
 
+def _local_gap_seconds(a: dict, b: dict) -> int | None:
+    if a.get("day") != b.get("day") or a.get("type") in ("交通", "天气", "酒店") or b.get("type") in ("交通", "天气", "酒店"):
+        return None
+    if a.get("date") and b.get("date") and a["date"] != b["date"]:
+        return None
+    import re
+    pattern = r"\s*(\d{1,2}):(\d{2})\s*[-—–~～至]\s*(\d{1,2}):(\d{2})\s*"
+    before, after = re.fullmatch(pattern, str(a.get("time") or "")), re.fullmatch(pattern, str(b.get("time") or ""))
+    if not before or not after:
+        return None
+    values = [int(value) for value in (*before.groups(), *after.groups())]
+    if any(hour > 23 or minute > 59 for hour, minute in zip(values[::2], values[1::2])):
+        return None
+    return ((values[4] * 60 + values[5]) - (values[2] * 60 + values[3])) * 60
+
+
+def _route_for_schedule(a: dict, b: dict) -> dict | None:
+    leg = route_leg(a["_geo"], b["_geo"])
+    gap = _local_gap_seconds(a, b)
+    duration = route_seconds(leg)
+    if (not leg or gap is None or gap <= 0 or duration is None or
+            duration + LOCAL_TRANSFER_PADDING_S <= gap or leg.get("mode") not in ("walk", "transit") or
+            leg.get("mode_locked") is True):
+        return leg
+    driving = driving_travel(a["_geo"]["location"], b["_geo"]["location"])
+    driving_seconds = route_seconds(driving)
+    if driving_seconds is None:
+        return leg
+    # Keep the coordinate cache's default independent of a particular itinerary.
+    # The chosen faster route and its polyline are sent to both map and reviewer.
+    selected, alternative = (driving, leg) if driving_seconds < duration else (leg, driving)
+    result = dict(selected)
+    if selected is driving:
+        result["selection_reason"] = "原步行或公交路线耗时较长，已核实改用较快的驾车路线。"
+    result["alternatives"] = [{key: alternative[key] for key in ("mode", "duration_s", "distance_m") if key in alternative}]
+    return result
+
+
 def _is_stop(block: dict) -> bool:
     # 去程/回程的航班车次、多选一的餐饮推荐无法定位到一个点
     return bool(block.get("name")) and block.get("type") != "交通" and block.get("note") != "餐饮推荐"
@@ -302,7 +344,7 @@ def attach_routes(result: dict, city: str) -> dict:
             last_hotel[style] = hotels[-1]
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
-        routed = list(ex.map(lambda p: route_leg(p[2]["_geo"], p[3]["_geo"]), pairs))
+        routed = list(ex.map(lambda p: _route_for_schedule(p[2], p[3]), pairs))
     _save_cache()
 
     legs = []

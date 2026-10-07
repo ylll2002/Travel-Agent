@@ -88,6 +88,40 @@ class HybridTests(unittest.TestCase):
         sent = json.loads(client.chat.completions.create.call_args.kwargs["messages"][1]["content"])
         self.assertEqual(sent["rule_review"]["rule_summary"], result["rule_summary"])
 
+    def test_model_cannot_turn_default_transit_or_feasible_drive_into_local_buffer_blocker(self):
+        for mode, duration, kind in (("transit", 2708, "交通"), ("drive", 848, "交通"), ("transit", 2708, "时间"), ("drive", 848, "时间"), ("walk", None, "交通")):
+            with self.subTest(mode=mode, kind=kind):
+                plan, search, basic = fixture()
+                plan["blocks"][0]["time"] = "12:00-13:00"
+                other = {**copy.deepcopy(plan["blocks"][0]), "id":"v2", "name":"公园", "time":"13:40-14:10"}
+                plan["blocks"].append(other)
+                search["poi"].append({"name":"公园", "url":other["link"]})
+                plan["legs"] = [{"from":"v1", "to":"v2", "mode":mode, "duration_s":duration}]
+                issue = {**model_issue(kind), "detail":"间隔不足，需预留进出站时间", "block_ids":["v1","v2"],
+                         "evidence":[{"path":"plan.legs[0].duration_s", "value":duration},
+                                     {"path":"plan.blocks[0].time", "value":"12:00-13:00"},
+                                     {"path":"plan.blocks[1].time", "value":"13:40-14:10"}]}
+                self.model({"passed":False, "issues":[issue]})
+                result = validate.validate_plan(plan, search=search, basic=basic)
+                self.assertTrue(result["passed"])
+                self.assertFalse(any(i["severity"] == "high" for i in result["issues"]))
+                model = next(i for i in result["issues"] if i["source"] == "model")
+                self.assertFalse(model["actionable"])
+
+    def test_local_mode_guard_does_not_erase_operational_closure_evidence(self):
+        plan, search, basic = fixture()
+        plan["blocks"][0]["time"] = "12:00-13:00"
+        other = {**copy.deepcopy(plan["blocks"][0]), "id":"v2", "name":"公园", "time":"13:40-14:10"}
+        plan["blocks"].append(other)
+        search["poi"].append({"name":"公园", "route_status":"道路封闭"})
+        plan["legs"] = [{"from":"v1", "to":"v2", "mode":"drive", "duration_s":848}]
+        issue = {**model_issue("交通"), "detail":"公园入口道路已封闭", "block_ids":["v1","v2"],
+                 "evidence":[{"path":"search.poi[1].route_status", "value":"道路封闭"}]}
+        self.model({"passed":False, "issues":[issue]})
+        result = validate.validate_plan(plan, search=search, basic=basic)
+        self.assertFalse(result["passed"])
+        self.assertTrue(any(i["severity"] == "high" and i["source"] == "model" for i in result["issues"]))
+
     def test_explicit_allergy_can_be_reviewed_using_actual_inputs(self):
         plan, search, basic = fixture()
         plan["blocks"][0].update(type="美食", name="测试餐厅", link="https://example.test/meal")
@@ -160,6 +194,45 @@ class HybridTests(unittest.TestCase):
                     SimpleNamespace(message=SimpleNamespace(content=json.dumps({"passed": False, "issues": [model_issue(kind, evidence)]})))])
                 result = validate.validate_plan(plan, search=search, basic=basic, **extras)
                 self.assertEqual(result["status"], "warning")
+
+    def test_unknown_quote_cannot_violate_specialty_cap_or_completeness(self):
+        plan, search, basic = fixture()
+        plan["blocks"][0].update(price=0, unit_price=None, price_known=False)
+        basic["hard_limits"] = {"ticket_price": 20}
+        evidence = [{"path": "basic.hard_limits.ticket_price", "value": 20},
+                    {"path": "plan.blocks[0].price_known", "value": False},
+                    {"path": "plan.blocks[0].unit_price", "value": None}]
+        for kind in ("预算", "完整性"):
+            issue = model_issue(kind, evidence)
+            issue["detail"] = "景点暂无报价，不能确认消费，所以无法通过"
+            with self.subTest(kind=kind), patch("validate.OpenAI") as factory:
+                factory.return_value.chat.completions.create.return_value = SimpleNamespace(choices=[
+                    SimpleNamespace(message=SimpleNamespace(content=json.dumps({"passed": False, "issues": [issue]})))])
+                result = validate.validate_plan(plan, search=search, basic=basic)
+            self.assertEqual(result["status"], "warning")
+            self.assertTrue(result["passed"])
+            self.assertTrue(all(i["severity"] != "high" for i in result["issues"]))
+            self.assertFalse(next(i for i in result["issues"] if i["source"] == "model")["actionable"])
+            self.assertIsNone(repair_feedback(result))
+
+    def test_unknown_quote_does_not_erase_actual_weather_conflict(self):
+        plan, search, basic = fixture()
+        plan["blocks"][0].update(price_known=False)
+        issue = model_issue("天气", [{"path": "plan.blocks[0].price_known", "value": False},
+                                     {"path": "search.weather.days[0].weather", "value": "暴雨"}])
+        issue["detail"] = "景点暂无报价，但当天暴雨不适合露天活动"
+        self.model({"passed": False, "issues": [issue]})
+        result = validate.validate_plan(plan, search=search, basic=basic)
+        self.assertEqual(result["status"], "blocked")
+        self.assertTrue(any(i["severity"] == "high" and i["type"] == "天气" for i in result["issues"]))
+
+    def test_specialty_cap_with_known_charge_below_cap_cannot_block(self):
+        plan, search, basic = fixture()
+        basic["hard_limits"] = {"ticket_price": 40}
+        self.model({"passed": False, "issues": [model_issue("预算", [
+            {"path": "basic.hard_limits.ticket_price", "value": 40},
+            {"path": "plan.blocks[0].price", "value": 30}])]})
+        self.assertEqual(validate.validate_plan(plan, search=search, basic=basic)["status"], "warning")
 
     def test_model_failure_keeps_rule_warning_summary_and_history(self):
         plan, search, basic = fixture()
@@ -288,3 +361,36 @@ class HybridTests(unittest.TestCase):
                 factory.return_value.chat.completions.create.return_value = SimpleNamespace(choices=[
                     SimpleNamespace(message=SimpleNamespace(content=json.dumps({"passed": False, "issues": [model_issue(kind, evidence)]})))])
                 self.assertEqual(validate.validate_plan(plan, search=search, basic=basic)["status"], "blocked")
+
+
+    def test_weather_object_evidence_expands_and_still_blocks_in_hybrid_review(self):
+        plan, search, basic = fixture()
+        self.model({"passed": False, "issues": [model_issue(evidence=["search.weather.days[0]"])]})
+        result = validate.validate_plan(plan, search=search, basic=basic)
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["checks"]["model"], "completed")
+        self.assertTrue(any(e["path"] == "search.weather.days[0].weather" and e["value"] == "暴雨"
+                            for e in result["issues"][0]["evidence"]))
+
+    def test_compact_weather_evidence_still_blocks_with_real_input_value(self):
+        plan, search, basic = fixture()
+        self.model({"passed": False, "issues": [model_issue(evidence=["search.weather.days[0].weather"])]})
+        result = validate.validate_plan(plan, search=search, basic=basic)
+        self.assertEqual(result["status"], "blocked")
+        self.assertEqual(result["issues"][0]["evidence"], [
+            {"path": "search.weather.days[0].weather", "value": "暴雨"}])
+        self.assertIn("暴雨", repair_feedback(result))
+
+    def test_truncation_preserves_price_warning_without_passing_or_repairing(self):
+        plan, search, basic = fixture()
+        plan["blocks"][0].update(price_known=False, unit_price=None, price=0)
+        with patch("validate.OpenAI") as factory:
+            client = factory.return_value
+            client.chat.completions.create.return_value = SimpleNamespace(choices=[
+                SimpleNamespace(finish_reason="length", message=SimpleNamespace(content='{"passed":'))])
+            result = validate.validate_plan(plan, search=search, basic=basic)
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["checks"], {"rules": "completed", "model": "error"})
+        self.assertTrue(any(i["source"] == "rule" and i["type"] == "预算" for i in result["issues"]))
+        self.assertIsNone(repair_feedback(result))
+        self.assertEqual(client.chat.completions.create.call_count, 2)

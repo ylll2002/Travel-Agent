@@ -41,9 +41,11 @@ export function currentAudit(value: unknown, revision: unknown): PlanAudit | nul
 
 export function reviewMessage(audit: PlanAudit | null): string {
   if (!audit || audit.status === 'error') return '审核暂未完成，当前版本需要重新审核。';
-  const details = audit.issues.slice(0, 3).map((issue) => issue.detail).filter(Boolean).join('；');
-  if (!audit.passed) return `审核提示：${details || '建议进一步检查行程安排。'}`;
-  return details ? `审核建议：${details}` : '当前行程已通过审核。';
+  // Details and evidence live in the plan panel; chat only reports the outcome.
+  if (!audit.passed) return '当前行程需要调整，请查看审核窗口的审核结果。';
+  return audit.status === 'warning'
+    ? '当前行程已通过审核，核实事项请查看审核窗口。'
+    : '当前行程已通过审核。';
 }
 
 export function currentPlanAudit(plan: { revision?: unknown; audit?: unknown; review_pending?: boolean } | null): PlanAudit | null {
@@ -90,4 +92,36 @@ export function reviewHeading(plan: ReviewPlan): { status: string; title: string
   };
   const [title, description] = descriptions[audit.status];
   return { status: audit.status, title, description };
+}
+
+
+export type ReviewProgress = {
+  stage: 'planning' | 'reviewing' | 'repairing' | 'passed' | 'warning' | 'blocked' | 'error' | 'cancelled';
+  repairCount: number;
+  repairLimit: number;
+  stopReason?: string;
+  entries: Array<{ stage: string; revision?: number; reasons: string[] }>;
+};
+
+export function canAutoRepair(audit: PlanAudit | null): boolean {
+  return !!audit && audit.status === 'blocked' && !audit.error && !audit.passed
+    && audit.issues.some(issue => issue.severity === 'high' && issue.actionable);
+}
+
+export function advanceReviewProgress(previous: ReviewProgress | null, event: Record<string, unknown>): ReviewProgress | null {
+  const stages = ['planning', 'reviewing', 'repairing', 'passed', 'warning', 'blocked', 'error', 'cancelled'];
+  if (!stages.includes(String(event.stage))) return previous;
+  const stage = event.stage as ReviewProgress['stage'];
+  const plan = event.plan as {revision?: number} | undefined;
+  const audit = currentAudit(event.audit, plan?.revision);
+  const reasons = audit?.issues.filter(issue => issue.severity === 'high').map(issue => issue.detail) ?? [];
+  if (audit?.error) reasons.push(audit.error);
+  if (typeof event.error === 'string') reasons.push(event.error);
+  const entry = {stage, revision: plan?.revision, reasons};
+  const entries = [...(previous?.entries ?? [])];
+  const last = entries[entries.length - 1];
+  if (!last || last.stage !== stage || last.revision !== entry.revision || JSON.stringify(last.reasons) !== JSON.stringify(reasons)) entries.push(entry);
+  return {stage, repairCount: Number(event.repair_count ?? previous?.repairCount ?? 0),
+    repairLimit: Number(event.repair_limit ?? previous?.repairLimit ?? 2),
+    stopReason: typeof event.stop_reason === 'string' ? event.stop_reason : undefined, entries};
 }

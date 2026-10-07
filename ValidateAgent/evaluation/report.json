@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "evaluation_kind": "offline_synthetic_regression",
-  "dataset_sha256": "ae374f5360b7b9b6553919e87a1d3c411a954cb59730aaaf7df67af2662c62b3",
+  "dataset_sha256": "79290996feb9d232838cbaa785dde543b982bb8d47a63e8356f86e4a1142f23b",
   "limitations": [
     "规则结果不代表完整模型审核通过。",
     "模型替身用于验证合并与证据保护，不评价真实模型语义质量。",
@@ -9,22 +9,22 @@
     "指标基于人工案例标签，不是生产准确率或独立泛化测试。"
   ],
   "metrics": {
-    "case_count": 25,
-    "passed_cases": 25,
+    "case_count": 33,
+    "passed_cases": 33,
     "status_accuracy": 1.0,
-    "high_true_positive": 11,
+    "high_true_positive": 13,
     "high_false_positive": 0,
     "high_false_negative": 0,
     "high_precision": 1.0,
     "high_recall": 1.0,
     "false_blocked_cases": 0,
     "missed_blocked_cases": 0,
-    "evidence_count": 30,
-    "verifiable_evidence_count": 30,
+    "evidence_count": 55,
+    "verifiable_evidence_count": 55,
     "evidence_value_match_rate": 1.0,
-    "named_occurrences": 29,
-    "matched_occurrences": 26,
-    "source_coverage": 0.8966
+    "named_occurrences": 43,
+    "matched_occurrences": 40,
+    "source_coverage": 0.9302
   },
   "cases": [
     {
@@ -531,8 +531,8 @@
           {
             "severity": "high",
             "type": "交通",
-            "detail": "「示例博物馆」到「示例公园」间隔不足以容纳路线耗时及进出站预留。",
-            "suggestion": "提前结束前一活动或推迟后一活动；保留当前项目航班120分钟、列车60分钟预留。",
+            "detail": "「示例博物馆」到「示例公园」间隔20分钟，当前路线路线约45分钟，当前路线耗时超出可用间隔。",
+            "suggestion": "提前结束前一活动或推迟后一活动，保留实际转场所需时间。",
             "actionable": true,
             "source": "rule",
             "plan_style": "经典",
@@ -1618,6 +1618,699 @@
             "ambiguous_count": 0,
             "coverage": 1.0
           }
+        }
+      }
+    },
+    {
+      "id": "hybrid-unknown-quote-pass",
+      "description": "报价未知但没有其他严重问题，组合审核可以通过并保留提示",
+      "mode": "hybrid_fixture",
+      "expected_status": "warning",
+      "actual_status": "warning",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [
+        "预算"
+      ],
+      "expected_warning_types": [
+        "预算"
+      ],
+      "audit": {
+        "schema_version": 1,
+        "status": "warning",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "medium",
+            "type": "预算",
+            "detail": "「经典」有报价未知项目，已知小计不代表完整总费用。",
+            "suggestion": "预订前核实缺失报价；未知价格不能当作免费。",
+            "actionable": false,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "evidence": [
+              {
+                "path": "plan.blocks[0]",
+                "value": {
+                  "id": "a",
+                  "name": "示例博物馆",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "09:00-11:00",
+                  "price": 0,
+                  "price_known": false,
+                  "link": "https://example.test/a",
+                  "unit_price": null
+                }
+              }
+            ]
+          }
+        ],
+        "feedback": "审核通过；请在出行前核实风险提示。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 0.0,
+              "budget_status": "unknown",
+              "unknown_count": 1
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 1,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        },
+        "checks": {
+          "rules": "completed",
+          "model": "completed"
+        }
+      }
+    },
+    {
+      "id": "hybrid-unknown-quote-not-hard-conflict",
+      "description": "仅因报价缺失的模拟完整性严重问题降为建议，专项上限也不改变这一点",
+      "mode": "hybrid_fixture",
+      "expected_status": "warning",
+      "actual_status": "warning",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [
+        "完整性",
+        "预算"
+      ],
+      "expected_warning_types": [
+        "完整性",
+        "预算"
+      ],
+      "audit": {
+        "schema_version": 1,
+        "status": "warning",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "medium",
+            "type": "预算",
+            "detail": "「经典」有报价未知项目，已知小计不代表完整总费用。",
+            "suggestion": "预订前核实缺失报价；未知价格不能当作免费。",
+            "actionable": false,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "evidence": [
+              {
+                "path": "plan.blocks[0]",
+                "value": {
+                  "id": "a",
+                  "name": "示例博物馆",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "09:00-11:00",
+                  "price": 0,
+                  "price_known": false,
+                  "link": "https://example.test/a",
+                  "unit_price": null
+                }
+              }
+            ]
+          },
+          {
+            "severity": "medium",
+            "type": "完整性",
+            "detail": "景点暂无报价所以不能通过（暂无报价仅需预订前核实，不作为阻断行程的理由。）",
+            "suggestion": "预订前核实报价",
+            "actionable": false,
+            "source": "model",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "evidence": [
+              {
+                "path": "basic.hard_limits.ticket_price",
+                "value": 20
+              },
+              {
+                "path": "plan.blocks[0].price_known",
+                "value": false
+              },
+              {
+                "path": "plan.blocks[0].unit_price",
+                "value": null
+              }
+            ]
+          }
+        ],
+        "feedback": "审核通过；请在出行前核实风险提示。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 0.0,
+              "budget_status": "unknown",
+              "unknown_count": 1
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 1,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        },
+        "checks": {
+          "rules": "completed",
+          "model": "completed"
+        }
+      }
+    },
+    {
+      "id": "city-default-transit-unconfirmed",
+      "description": "40分钟间隔，默认公交45分钟，但未固定交通方式；只核实，不阻断",
+      "mode": "rules",
+      "expected_status": "warning",
+      "actual_status": "warning",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [
+        "交通"
+      ],
+      "expected_warning_types": [
+        "交通"
+      ],
+      "audit": {
+        "schema_version": 1,
+        "status": "warning",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "medium",
+            "type": "交通",
+            "detail": "「示例博物馆」到「示例公园」间隔40分钟，当前公交/地铁路线约46分钟；其他交通方式尚未核实，不能据此认定无法到达。",
+            "suggestion": "可核实驾车或其他可用路线；若坚持当前方式，再调整活动时间。",
+            "actionable": false,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a",
+              "b"
+            ],
+            "evidence": [
+              {
+                "path": "plan.legs[0].duration_s",
+                "value": 2708
+              },
+              {
+                "path": "plan.blocks[0]",
+                "value": {
+                  "id": "a",
+                  "name": "示例博物馆",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "12:00-13:00",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/a"
+                }
+              },
+              {
+                "path": "plan.blocks[1]",
+                "value": {
+                  "id": "b",
+                  "name": "示例公园",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "13:40-14:10",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/b"
+                }
+              },
+              {
+                "path": "plan.legs[0].mode",
+                "value": "transit"
+              }
+            ]
+          }
+        ],
+        "feedback": "规则未发现严重冲突；未知信息和风险提示仍需核实。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 60.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 2,
+            "matched_count": 2,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "city-driving-fits",
+      "description": "40分钟间隔，已核实驾车约14分钟，不能附加进出站预留",
+      "mode": "rules",
+      "expected_status": "passed",
+      "actual_status": "passed",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "passed",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [],
+        "feedback": "现有数据范围内规则检查通过。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 60.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 2,
+            "matched_count": 2,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "city-known-alternative-fits",
+      "description": "默认公交偏慢，但已有真实驾车备选能容纳转场",
+      "mode": "rules",
+      "expected_status": "passed",
+      "actual_status": "passed",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "passed",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [],
+        "feedback": "现有数据范围内规则检查通过。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 60.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 2,
+            "matched_count": 2,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "city-fixed-transit-conflict",
+      "description": "固定采用公交，即使驾车更快也不能放过真实不足",
+      "mode": "rules",
+      "expected_status": "blocked",
+      "actual_status": "blocked",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "blocked",
+        "passed": false,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "high",
+            "type": "交通",
+            "detail": "「示例博物馆」到「示例公园」间隔40分钟，公交/地铁路线约46分钟，当前路线耗时超出可用间隔。",
+            "suggestion": "提前结束前一活动或推迟后一活动，保留实际转场所需时间。",
+            "actionable": true,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a",
+              "b"
+            ],
+            "evidence": [
+              {
+                "path": "plan.legs[0].duration_s",
+                "value": 2708
+              },
+              {
+                "path": "plan.blocks[0]",
+                "value": {
+                  "id": "a",
+                  "name": "示例博物馆",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "12:00-13:00",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/a"
+                }
+              },
+              {
+                "path": "plan.blocks[1]",
+                "value": {
+                  "id": "b",
+                  "name": "示例公园",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "13:40-14:10",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/b"
+                }
+              },
+              {
+                "path": "plan.legs[0].mode",
+                "value": "transit"
+              },
+              {
+                "path": "plan.legs[0].mode_locked",
+                "value": true
+              },
+              {
+                "path": "plan.legs[0].alternatives[0].mode",
+                "value": "drive"
+              },
+              {
+                "path": "plan.legs[0].alternatives[0].duration_s",
+                "value": 848
+              }
+            ]
+          }
+        ],
+        "feedback": "请修复规则发现的严重问题。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 60.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 2,
+            "matched_count": 2,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "city-driving-too-short",
+      "description": "仅10分钟间隔，驾车也需约14分钟，保留真实严重冲突",
+      "mode": "rules",
+      "expected_status": "blocked",
+      "actual_status": "blocked",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "blocked",
+        "passed": false,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "high",
+            "type": "交通",
+            "detail": "「示例博物馆」到「示例公园」间隔10分钟，驾车/打车路线约15分钟，当前路线耗时超出可用间隔。",
+            "suggestion": "提前结束前一活动或推迟后一活动，保留实际转场所需时间。",
+            "actionable": true,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a",
+              "b"
+            ],
+            "evidence": [
+              {
+                "path": "plan.legs[0].duration_s",
+                "value": 848
+              },
+              {
+                "path": "plan.blocks[0]",
+                "value": {
+                  "id": "a",
+                  "name": "示例博物馆",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "12:00-13:00",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/a"
+                }
+              },
+              {
+                "path": "plan.blocks[1]",
+                "value": {
+                  "id": "b",
+                  "name": "示例公园",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "13:10-14:10",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/b"
+                }
+              },
+              {
+                "path": "plan.legs[0].mode",
+                "value": "drive"
+              }
+            ]
+          }
+        ],
+        "feedback": "请修复规则发现的严重问题。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 60.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 2,
+            "matched_count": 2,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "model-city-mode-false-block",
+      "description": "模型不能把未固定的市内公交方式加上进出站缓冲重新判high",
+      "mode": "hybrid_fixture",
+      "expected_status": "warning",
+      "actual_status": "warning",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [
+        "交通"
+      ],
+      "expected_warning_types": [
+        "交通"
+      ],
+      "audit": {
+        "schema_version": 1,
+        "status": "warning",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "medium",
+            "type": "交通",
+            "detail": "「示例博物馆」到「示例公园」间隔40分钟，当前公交/地铁路线约46分钟；其他交通方式尚未核实，不能据此认定无法到达。",
+            "suggestion": "可核实驾车或其他可用路线；若坚持当前方式，再调整活动时间。",
+            "actionable": false,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a",
+              "b"
+            ],
+            "evidence": [
+              {
+                "path": "plan.legs[0].duration_s",
+                "value": 2708
+              },
+              {
+                "path": "plan.blocks[0]",
+                "value": {
+                  "id": "a",
+                  "name": "示例博物馆",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "12:00-13:00",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/a"
+                }
+              },
+              {
+                "path": "plan.blocks[1]",
+                "value": {
+                  "id": "b",
+                  "name": "示例公园",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "13:40-14:10",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/b"
+                }
+              },
+              {
+                "path": "plan.legs[0].mode",
+                "value": "transit"
+              }
+            ]
+          },
+          {
+            "severity": "medium",
+            "type": "交通",
+            "detail": "间隔不足以容纳公交及进出站预留（市内路线已有可行方式或其他方式尚未核实，不能仅按默认方式判定无法到达。）",
+            "suggestion": "重新安排行程",
+            "actionable": false,
+            "source": "model",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a",
+              "b"
+            ],
+            "evidence": [
+              {
+                "path": "plan.legs[0].duration_s",
+                "value": 2708
+              }
+            ]
+          }
+        ],
+        "feedback": "审核通过；请在出行前核实风险提示。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 60.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 2,
+            "matched_count": 2,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        },
+        "checks": {
+          "rules": "completed",
+          "model": "completed"
         }
       }
     }

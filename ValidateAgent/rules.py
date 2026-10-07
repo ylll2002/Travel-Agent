@@ -13,6 +13,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from shared.audit import failed_audit, normalize_audit
+from shared.route_timing import MODE_LABELS, route_gap_status
 
 SOURCES = {"景点": ("poi",), "酒店": ("hotels",), "美食": ("food",), "餐饮": ("food",),
            "活动": ("events", "poi", "promotions")}
@@ -221,9 +222,16 @@ def _span(block, plan):
 def _transport_buffer(block):
     if block.get("type") != "交通":
         return 0
-    if block.get("flight_no") or block.get("kind") == "flight" or re.search(r"航班|飞机|机场", str(block.get("name") or "")):
+    if block.get("flight_no") or block.get("kind") == "flight":
         return 120 * 60
-    if block.get("train_no") or block.get("kind") == "train" or re.search(r"高铁|火车|列车|动车", str(block.get("name") or "")):
+    if block.get("train_no") or block.get("kind") == "train":
+        return 60 * 60
+    name = str(block.get("name") or "")
+    if block.get("kind") in ("walk", "transit", "drive", "taxi", "bus", "metro") or re.search(r"打车|出租车|驾车|步行|地铁|公交|接驳", name):
+        return 0
+    if re.search(r"航班|飞机", name):
+        return 120 * 60
+    if re.search(r"高铁|火车|列车|动车", name):
         return 60 * 60
     return 0
 
@@ -295,10 +303,30 @@ def _time_checks(plan, rows, issues):
         checked.add(pair)
         gap = (sb[0] - sa[1]).total_seconds()
         buffer = _transport_buffer(b[0]) + _transport_buffer(a[0])
-        if gap >= 0 and Decimal(str(gap)) < duration + buffer:
-            _add(issues, "交通", "high", f"「{a[0].get('name')}」到「{b[0].get('name')}」间隔不足以容纳路线耗时及进出站预留。",
-                 "提前结束前一活动或推迟后一活动；保留当前项目航班120分钟、列车60分钟预留。", [a, b],
-                 [_evidence(path + ".duration_s", leg["duration_s"]), _evidence(a[1], a[0]), _evidence(b[1], b[0])], actionable=True)
+        status = route_gap_status(leg, gap, buffer) if gap >= 0 else "overlap"
+        evidence = [_evidence(path + ".duration_s", leg["duration_s"]), _evidence(a[1], a[0]), _evidence(b[1], b[0])]
+        if "mode" in leg:
+            evidence.append(_evidence(path + ".mode", leg["mode"]))
+        if "mode_locked" in leg:
+            evidence.append(_evidence(path + ".mode_locked", leg["mode_locked"]))
+        for index, alternative in enumerate(leg.get("alternatives") or []):
+            if isinstance(alternative, dict):
+                for field in ("mode", "duration_s"):
+                    if field in alternative:
+                        evidence.append(_evidence(f"{path}.alternatives[{index}].{field}", alternative[field]))
+        mode = MODE_LABELS.get(leg.get("mode"), "当前路线")
+        if status == "mode_unconfirmed":
+            _add(issues, "交通", "medium", f"「{a[0].get('name')}」到「{b[0].get('name')}」间隔{gap / 60:g}分钟，"
+                 f"当前{mode}路线约{math.ceil(float(duration) / 60)}分钟；其他交通方式尚未核实，不能据此认定无法到达。",
+                 "可核实驾车或其他可用路线；若坚持当前方式，再调整活动时间。", [a, b], evidence)
+        elif status == "insufficient":
+            detail = f"「{a[0].get('name')}」到「{b[0].get('name')}」间隔{gap / 60:g}分钟，"
+            detail += f"{mode}路线约{math.ceil(float(duration) / 60)}分钟"
+            detail += f"，另需进出站预留{buffer / 60:g}分钟。" if buffer else "，当前路线耗时超出可用间隔。"
+            suggestion = "提前结束前一活动或推迟后一活动，保留实际转场所需时间。"
+            if buffer:
+                suggestion += "航班120分钟、列车60分钟的预留仅适用于已选班次。"
+            _add(issues, "交通", "high", detail, suggestion, [a, b], evidence, actionable=True)
     # The current planner reserves 120/60 minutes even without a mapped station route.
     groups = defaultdict(list)
     for row, span in timed:

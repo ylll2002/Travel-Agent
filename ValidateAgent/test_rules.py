@@ -159,6 +159,54 @@ class TimeRulesTests(unittest.TestCase):
         result = report([block(), block("b", clock="11:45-13:00")], legs=[{"from": "a", "to": "b", "duration_s": 2700}])
         self.assertEqual(issues(result, "交通"), [])
 
+    def test_city_drive_and_walk_never_require_station_buffers(self):
+        for mode in ("drive", "walk"):
+            with self.subTest(mode=mode):
+                result = report([block(clock="12:00-13:00"), block("b", "公园", clock="13:40-14:10")],
+                                legs=[{"from":"a", "to":"b", "mode":mode, "duration_s":848}])
+                self.assertEqual(issues(result, "交通"), [])
+
+    def test_unfixed_slow_transit_or_walk_is_only_a_mode_verification_warning(self):
+        for mode in ("transit", "walk"):
+            with self.subTest(mode=mode):
+                result = report([block(clock="12:00-13:00"), block("b", "公园", clock="13:40-14:10")],
+                                legs=[{"from":"a", "to":"b", "mode":mode, "duration_s":2708}])
+                self.assertEqual(issues(result, "交通", "high"), [])
+                self.assertEqual(len(issues(result, "交通", "medium")), 1)
+                self.assertIn("其他交通方式尚未核实", issues(result, "交通")[0]["detail"])
+                self.assertNotIn("进出站", issues(result, "交通")[0]["detail"])
+
+    def test_verified_faster_alternative_fits_but_fixed_transit_still_blocks(self):
+        leg = {"from":"a", "to":"b", "mode":"transit", "duration_s":2708,
+               "alternatives":[{"mode":"drive", "duration_s":848}]}
+        blocks = [block(clock="12:00-13:00"), block("b", "公园", clock="13:40-14:10")]
+        self.assertEqual(issues(report(blocks, legs=[leg]), "交通"), [])
+        found = issues(report(blocks, legs=[{**leg,"mode_locked":True}]), "交通", "high")
+        self.assertEqual(len(found), 1)
+        self.assertNotIn("进出站", found[0]["detail"])
+
+    def test_verified_drive_also_exceeds_gap_and_real_conflict_keeps_location(self):
+        leg = {"from":"a", "to":"b", "mode":"transit", "duration_s":2708,
+               "alternatives":[{"mode":"drive", "duration_s":848}]}
+        found = issues(report([block(clock="12:00-13:00"), block("b", "公园", clock="13:10-14:10")], legs=[leg]), "交通", "high")
+        self.assertEqual(len(found), 1)
+        self.assertEqual(found[0]["block_ids"], ["a","b"])
+        self.assertIn({"path":"plan.legs[0].alternatives[0].duration_s", "value":848}, found[0]["evidence"])
+
+    def test_drive_conflict_description_does_not_suggest_flight_buffer(self):
+        found = issues(report([block(), block("b", "公园", clock="11:05-12:00")],
+                              legs=[{"from":"a", "to":"b", "mode":"drive", "duration_s":848}]), "交通", "high")
+        self.assertEqual(len(found), 1)
+        self.assertIn("间隔5分钟", found[0]["detail"])
+        self.assertNotIn("航班", found[0]["suggestion"])
+
+    def test_local_airport_or_station_transfer_is_not_itself_a_flight_or_train(self):
+        for name in ("打车前往机场", "地铁前往火车站", "机场至酒店接驳"):
+            with self.subTest(name=name):
+                local = block("t", name, "交通", clock="11:20-12:00")
+                result = report([block(), local], legs=[{"from":"a", "to":"t", "mode":"drive", "duration_s":600}])
+                self.assertEqual(issues(result, "交通", "high"), [])
+
     def test_missing_route_is_warning_not_invented_conflict(self):
         result = report([block(), block("b", "灵隐寺", clock="12:00-13:00")])
         self.assertTrue(result["passed"])

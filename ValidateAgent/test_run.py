@@ -130,5 +130,15 @@ class RunLoopTests(unittest.TestCase):
         self.assertEqual(context["basic"], {"total_budget": 100})
 
 
+    def test_four_passed_suggestions_do_not_trigger_another_plan(self):
+        suggestions = [{**issue("medium"), "detail": detail} for detail in
+                       ("报价待核实", "优化杭帮菜匹配", "雨天可准备室内备选", "部分来源信息待核实")]
+        result, generate, validate = self.execute([{"passed": True, "issues": suggestions}])
+        self.assertEqual(result["audit"]["status"], "warning")
+        self.assertEqual(len(result["audit"]["issues"]), 4)
+        generate.assert_called_once()
+        validate.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -532,13 +532,16 @@ def plan_stream(payload: PlanRequest):
     """断开连接时立即清理 Orchestrator 及其模型/搜索子进程。"""
     destination, start_date, end_date, basic = _request_context(payload)
     data = _plan_data(payload, destination, start_date, end_date, basic)
+    return _orchestrator_stream(data)
 
+
+def _orchestrator_stream(data: dict, repair=False):
     async def event_stream():
         proc = None
         stderr_task = None
         try:
             proc = await asyncio.create_subprocess_exec(
-                str(ORCHESTRATOR_PYTHON), str(ORCHESTRATOR_PY), "--stream",
+                str(ORCHESTRATOR_PYTHON), str(ORCHESTRATOR_PY), "--stream", *(["--repair"] if repair else []),
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 env=_subprocess_env(), start_new_session=True, limit=4 * 1024 * 1024,
             )
@@ -617,6 +620,33 @@ def _merge_style_blocks(original: list[dict], replacement: list[dict], style: st
         else:
             merged.append(block)
     return merged
+
+
+
+@router.post("/repair/stream")
+def repair_stream(payload: PlanRequest):
+    """Recheck the stored snapshot, then repair only verified actionable failures."""
+    plan = copy.deepcopy(payload.plan or {})
+    if type(plan.get("revision")) is not int or plan["revision"] < 1 or payload.modify is not None:
+        raise HTTPException(status_code=422, detail="请提供当前完整行程，自动修复不接受额外修改指令")
+    _validated_blocks(plan.get("blocks"), allow_empty=True)
+    basic = plan.get("basic") or {}
+    if not isinstance(basic, dict) or (payload.basic is not None and payload.basic != basic):
+        raise HTTPException(status_code=422, detail="旅行需求已变化，请先更新行程")
+    for key in ("destination", "start_date", "end_date"):
+        if getattr(payload, key) not in (None, plan.get(key)):
+            raise HTTPException(status_code=422, detail="行程信息已变化，请先更新行程")
+    destination, start_date, end_date, basic = _request_context(PlanRequest(
+        destination=plan.get("destination"), start_date=plan.get("start_date"), end_date=plan.get("end_date"), basic=basic))
+    context = plan.get("review_context") or {}
+    if not isinstance(context, dict):
+        context = {}
+    data = {"destination": destination, "start_date": start_date, "end_date": end_date, "basic": basic,
+            "plan": _blocks_to_plan(plan["blocks"], destination, start_date, end_date, plan),
+            "search": payload.search or {}}
+    for key in ("profile", "preferences", "recent_trips"):
+        data[key] = getattr(payload, key) if getattr(payload, key) is not None else context.get(key)
+    return _orchestrator_stream(data, repair=True)
 
 
 @router.post("/review")

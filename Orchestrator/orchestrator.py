@@ -3,7 +3,7 @@
 图结构：
   START → search → plan → validate
             validate --通过/达到最大轮数--> END
-            validate --存在可修复严重问题--> plan（携带 feedback，至多修正一次）
+            validate --存在可修复严重问题--> plan（携带 feedback，至多修正两次）
 
 用法：
   echo '{"destination":"宁波","start_date":"2026-10-01","end_date":"2026-10-03","profile":{...},"basic":{...}}' \
@@ -39,7 +39,7 @@ PLAN_PYTHON = ROOT / "PlanAgent" / ".venv" / "bin" / "python"
 VALIDATE_PY = ROOT / "ValidateAgent" / "validate.py"
 VALIDATE_PYTHON = ROOT / "ValidateAgent" / ".venv" / "bin" / "python"
 
-MAX_ITERATIONS = 2
+MAX_ITERATIONS = 3
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000/api")
 
@@ -135,6 +135,8 @@ class State(TypedDict, total=False):
     feedback: str | None
     iteration: int
     history: list
+    repair_count: int
+    repair_error: str | None
 
 
 def _call(python: Path, script: Path, payload: dict) -> dict:
@@ -193,7 +195,8 @@ def plan_node(state: State) -> dict:
         basic = (state.get("plan") or {}).get("basic") or {}
     # 初始的全城美食只用于前端候选展示，规划时不传入（规划用景点锚点周边的美食）。
     search_for_plan = dict(state.get("search") or {})
-    search_for_plan.pop("food", None)
+    if not state.get("feedback"):
+        search_for_plan.pop("food", None)
     search_for_plan.pop("food_preview", None)
     payload = {
         "profile": state.get("profile"),
@@ -206,12 +209,22 @@ def plan_node(state: State) -> dict:
     }
     if state.get("feedback"):
         payload["feedback"] = state["feedback"]
-    if state.get("modify"):
+    if state.get("feedback") and state.get("plan"):
+        payload["audit_repair"] = True
+        payload["repair_issues"] = _high_actionable_issues(state.get("audit"))
+        payload["plan"] = without_review(state["plan"])
+    elif state.get("modify"):
         payload["modify"] = state["modify"]
         if state.get("plan"):
             payload["plan"] = without_review(state["plan"])
     result = without_review(_call(PLAN_PYTHON, PLAN_PY, payload))
-    if state.get("modify") and isinstance(result.get("basic"), dict):
+    repairing = bool(state.get("feedback") and state.get("plan"))
+    if repairing and (result.get("error") or not isinstance(result.get("blocks"), list)):
+        # Keep the last usable itinerary if a repair call fails.
+        return {"plan": without_review(state["plan"]), "repair_error": str(result.get("error") or "修复没有返回完整行程"),
+                "iteration": state.get("iteration", 0) + 1,
+                "repair_count": state.get("repair_count", 0) + 1}
+    if state.get("modify") and not repairing and isinstance(result.get("basic"), dict):
         basic = deepcopy(result["basic"])
     result.update(revision=next_plan_revision(state.get("plan")), basic=deepcopy(basic))
     search = merge_plan_sources(state.get("search"), result)
@@ -220,7 +233,8 @@ def plan_node(state: State) -> dict:
     if "food_preview" not in search and isinstance(original_search.get("food"), list):
         search["food_preview"] = deepcopy(original_search["food"])
     return {"plan": result, "search": search, "iteration": state.get("iteration", 0) + 1,
-            "audit": None, "feedback": None, "basic": basic}
+            "audit": None, "feedback": None, "basic": basic, "repair_error": None,
+            "repair_count": state.get("repair_count", 0) + int(repairing)}
 
 
 def _high_actionable_issues(audit: dict | None) -> list[dict]:
@@ -228,7 +242,11 @@ def _high_actionable_issues(audit: dict | None) -> list[dict]:
 
 
 def validate_node(state: State) -> dict:
-    if (state.get("plan") or {}).get("error"):
+    if state.get("repair_error"):
+        result = {**(state.get("audit") or failed_audit("自动修复失败", "请重试", state.get("plan"))),
+                  "passed": False, "error": "自动修复失败：" + state["repair_error"],
+                  "feedback": "现有行程已保留，请稍后重试自动修复。"}
+    elif (state.get("plan") or {}).get("error"):
         result = failed_audit("规划失败", "未生成有效方案，无法审核", state.get("plan"))
     else:
         result = _call(
@@ -259,7 +277,7 @@ def validate_node(state: State) -> dict:
 
 def should_continue(state: State) -> str:
     audit = state.get("audit") or {}
-    if (state.get("modify") or audit.get("error") or audit.get("passed") is not False
+    if (audit.get("error") or audit.get("passed") is not False
             or (state.get("plan") or {}).get("error")
             or state.get("iteration", 0) >= MAX_ITERATIONS
             or not _high_actionable_issues(audit)):
@@ -268,7 +286,7 @@ def should_continue(state: State) -> str:
 
 
 def should_validate(state: State) -> str:
-    # Recheck edits, but should_continue never silently rewrites an explicit edit.
+    # Every new snapshot, including automatic repairs, must be reviewed.
     return "validate"
 
 
@@ -312,23 +330,55 @@ def _result_output(result: dict, data: dict) -> dict:
         "history": result.get("history"),
         "saved_memory": saved_memory,
         "review_context": {key: result.get(key) for key in ("profile", "preferences", "recent_trips")},
+        "workflow": {"repair_count": result.get("repair_count", 0), "repair_limit": MAX_ITERATIONS - 1,
+                     "stop_reason": "error" if (result.get("audit") or {}).get("error") else
+                       "passed" if (result.get("audit") or {}).get("passed") else
+                       "limit" if result.get("iteration", 0) >= MAX_ITERATIONS else "needs_information"},
     }
 
 
-def build_graph():
+def build_graph(repair_existing=False):
     graph = StateGraph(State)
     graph.add_node("search", search_node)
     graph.add_node("prepare_memory", prepare_memory_node)
     graph.add_node("plan", plan_node)
     graph.add_node("validate", validate_node)
-    graph.add_edge(START, "search")
-    graph.add_edge(START, "prepare_memory")
+    if repair_existing:
+        graph.add_edge(START, "validate")
+    else:
+        graph.add_edge(START, "search")
+        graph.add_edge(START, "prepare_memory")
     graph.add_edge("search", "plan")
     graph.add_edge("prepare_memory", "plan")
     graph.add_conditional_edges("plan", should_validate, {"validate": "validate", "end": END})
     graph.add_conditional_edges("validate", should_continue, {"plan": "plan", "end": END})
     return graph.compile(checkpointer=MemorySaver())
 
+
+
+def stream_events(graph, data, config):
+    """Expose each usable snapshot and verdict before starting the next repair."""
+    state = deepcopy(data)
+    yield {"type": "node", "node": "start", "stage": "reviewing" if data.get("plan") else "planning",
+           "repair_count": 0, "repair_limit": MAX_ITERATIONS - 1}
+    for chunk in graph.stream(data, config=config):
+        for node, update in chunk.items():
+            state.update(update or {})
+            event = {"type": "node", "node": node}
+            if node == "search":
+                event["search"] = state.get("search")
+            if node in ("plan", "validate"):
+                plan = state.get("plan") or {}
+                event.update(plan=plan, search=state.get("search"), history=state.get("history") or [],
+                             repair_count=state.get("repair_count", 0), repair_limit=MAX_ITERATIONS - 1,
+                             review_context={k: state.get(k) for k in ("profile", "preferences", "recent_trips")})
+                if node == "plan":
+                    event.update(stage="reviewing", audit=None)
+                else:
+                    event.update(stage="repairing" if should_continue(state) == "plan" else
+                                 (state.get("audit") or {}).get("status", "error"), audit=state.get("audit"))
+            yield event
+    yield {"type": "final", "data": _result_output(state, data)}
 
 def main() -> None:
     if "--graph" in sys.argv:
@@ -348,32 +398,22 @@ def main() -> None:
         data = json.loads(raw)
 
         if "--stream" in sys.argv:
-            graph = build_graph()
-            thread_id = f"orchestrator-stream-{os.urandom(6).hex()}"
-            config = {"configurable": {"thread_id": thread_id}}
-            for chunk in graph.stream(data, config=config):
-                node = next(iter(chunk), "") if isinstance(chunk, dict) else ""
-                event = {"type": "node", "node": node}
-                if node == "search" and isinstance(chunk, dict) and isinstance(chunk.get("search"), dict):
-                    event["search"] = chunk["search"].get("search", chunk["search"])
-                print(
-                    json.dumps(event, ensure_ascii=False),
-                    flush=True,
-                )
-            final = graph.get_state(config).values
-            print(
-                json.dumps(
-                    {"type": "final", "data": _result_output(final, data)},
-                    ensure_ascii=False,
-                ),
-                flush=True,
-            )
+            repairing = "--repair" in sys.argv
+            if repairing:
+                data.update(iteration=1, repair_count=0, history=[], audit=None, feedback=None)
+            graph = build_graph(repair_existing=repairing)
+            config = {"configurable": {"thread_id": f"orchestrator-stream-{os.urandom(6).hex()}"}}
+            for event in stream_events(graph, data, config):
+                print(json.dumps(event, ensure_ascii=False), flush=True)
             return
 
         graph = build_graph()
         result = graph.invoke(data, {"configurable": {"thread_id": "orchestrator"}})
         output = _result_output(result, data)
     except Exception as exc:  # noqa: BLE001
+        if "--stream" in sys.argv:
+            print(json.dumps({"type": "error", "error": "自动处理未完成，请重试"}, ensure_ascii=False), flush=True)
+            return
         output = {"error": str(exc)}
 
     print(json.dumps(output, ensure_ascii=False, indent=2))

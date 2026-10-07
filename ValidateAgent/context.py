@@ -11,6 +11,9 @@ def plan_for_model(plan):
     for leg in trimmed.get("legs") or []:
         if isinstance(leg, dict):
             leg.pop("polyline", None)
+            for alternative in leg.get("alternatives") or []:
+                if isinstance(alternative, dict):
+                    alternative.pop("polyline", None)
     # Keep meal options: an unselected group must not look like a selected venue.
     return trimmed
 

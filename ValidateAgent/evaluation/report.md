@@ -4,26 +4,26 @@
 
 **这不是实际模型准确率报告。hybrid_fixture 使用预置模型输出，仅验证合并和证据处理。**
 
-数据集 SHA256：`ae374f5360b7b9b6553919e87a1d3c411a954cb59730aaaf7df67af2662c62b3`
+数据集 SHA256：`79290996feb9d232838cbaa785dde543b982bb8d47a63e8356f86e4a1142f23b`
 
 | 指标 | 结果 |
 |---|---:|
-| 案例数 | 25 |
-| 符合全部预期的案例 | 25 |
+| 案例数 | 33 |
+| 符合全部预期的案例 | 33 |
 | 状态匹配比例 | 1.0 |
-| 严重问题正确命中 | 11 |
+| 严重问题正确命中 | 13 |
 | 严重问题误报 | 0 |
 | 严重问题漏报 | 0 |
 | 严重问题精确率（此案例集） | 1.0 |
 | 严重问题召回率（此案例集） | 1.0 |
 | 错误阻断案例 | 0 |
 | 应阻断却未阻断案例 | 0 |
-| 问题依据条数 | 30 |
-| 可回读匹配的依据 | 30 |
+| 问题依据条数 | 55 |
+| 可回读匹配的依据 | 55 |
 | 依据值匹配比例 | 1.0 |
-| 命名地点出现次数 | 29 |
-| 来源匹配次数 | 26 |
-| 给定来源覆盖率 | 0.8966 |
+| 命名地点出现次数 | 43 |
+| 来源匹配次数 | 40 |
+| 给定来源覆盖率 | 0.9302 |
 
 严重问题按类型、方案、活动ID集合及来源进行一对一匹配；报价与路线缺失等提示也必须符合预期。
 依据值匹配仅表示引用的数据存在，不证明模型推理正确。审核错误单独记为 error，不计作通过或严重冲突。
@@ -55,6 +55,14 @@
 | hybrid-model-error：模拟模型超时保留未知报价规则提示，不能显示通过 | hybrid_fixture | error / error | 符合预期 |
 | hybrid-weather-evidence：模拟天气风险引用实际预报值，保留严重问题 | hybrid_fixture | blocked / blocked | 符合预期 |
 | selected-meal-index-zero：餐厅第一个选项索引0是有效选择，不误当成未选定 | rules | passed / passed | 符合预期 |
+| hybrid-unknown-quote-pass：报价未知但没有其他严重问题，组合审核可以通过并保留提示 | hybrid_fixture | warning / warning | 符合预期 |
+| hybrid-unknown-quote-not-hard-conflict：仅因报价缺失的模拟完整性严重问题降为建议，专项上限也不改变这一点 | hybrid_fixture | warning / warning | 符合预期 |
+| city-default-transit-unconfirmed：40分钟间隔，默认公交45分钟，但未固定交通方式；只核实，不阻断 | rules | warning / warning | 符合预期 |
+| city-driving-fits：40分钟间隔，已核实驾车约14分钟，不能附加进出站预留 | rules | passed / passed | 符合预期 |
+| city-known-alternative-fits：默认公交偏慢，但已有真实驾车备选能容纳转场 | rules | passed / passed | 符合预期 |
+| city-fixed-transit-conflict：固定采用公交，即使驾车更快也不能放过真实不足 | rules | blocked / blocked | 符合预期 |
+| city-driving-too-short：仅10分钟间隔，驾车也需约14分钟，保留真实严重冲突 | rules | blocked / blocked | 符合预期 |
+| model-city-mode-false-block：模型不能把未固定的市内公交方式加上进出站缓冲重新判high | hybrid_fixture | warning / warning | 符合预期 |
 
 ## 复现
 

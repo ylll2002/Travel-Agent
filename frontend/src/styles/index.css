@@ -2396,6 +2396,17 @@ button:disabled {
   font-weight: 700;
 }
 
+.ta-plan-block-leg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px 2px 90px;
+  font-size: 11px;
+  color: #697386;
+  border-bottom: 1px dashed #e6ebf2;
+  background: #f7f9fc;
+}
+
 .ta-plan-block-options {
   display: flex;
   flex-wrap: wrap;

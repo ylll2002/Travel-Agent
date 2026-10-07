@@ -152,6 +152,86 @@ def _transit(origin: str, dest: str, citycode: str) -> dict | None:
     }
 
 
+def _is_metro_line(name: str, typ: str | None = None) -> bool:
+    """判断一条公交线路是否为地铁/轨道交通。"""
+    text = f"{name or ''} {typ or ''}"
+    return any(key in text for key in ("地铁", "轨道", "轻轨", "号线"))
+
+
+def _transit_modes(origin: str, dest: str, citycode: str) -> list[dict]:
+    """返回「地铁（若有）+ 公交」两种方案，分别取耗时最短的一条。"""
+    route = _get(
+        "/v5/direction/transit/integrated",
+        origin=origin,
+        destination=dest,
+        city1=citycode,
+        city2=citycode,
+        show_fields="cost,polyline",
+    ).get("route") or {}
+    transits = route.get("transits") or []
+    metro: dict | None = None
+    bus: dict | None = None
+    for t in transits:
+        names: list[str] = []
+        is_metro = False
+        line: list[list[float]] = []
+        for seg in t.get("segments") or []:
+            for step in (seg.get("walking") or {}).get("steps") or []:
+                line += _points(step.get("polyline"))
+            for bl in (seg.get("bus") or {}).get("buslines") or []:
+                name = (bl.get("name") or "").split("(")[0]
+                if name:
+                    names.append(name)
+                if _is_metro_line(name, bl.get("type")):
+                    is_metro = True
+                line += _points(bl.get("polyline"))
+        duration = int(float((t.get("cost") or {}).get("duration") or 0))
+        if duration <= 0:
+            continue
+        info = {
+            "mode": "metro" if is_metro else "bus",
+            "label": "地铁" if is_metro else "公交",
+            "distance_m": int(float(t.get("distance") or 0)),
+            "duration_s": duration,
+            "lines": [n for n in names if n],
+            "polyline": line,
+        }
+        if is_metro and (metro is None or duration < metro["duration_s"]):
+            metro = info
+        elif not is_metro and (bus is None or duration < bus["duration_s"]):
+            bus = info
+    return [o for o in (metro, bus) if o]
+
+
+def _bicycling(origin: str, dest: str) -> dict | None:
+    """骑行路线（高德 /v5/direction/bicycling）。"""
+    try:
+        route = _get(
+            "/v5/direction/bicycling",
+            origin=origin,
+            destination=dest,
+            show_fields="cost,polyline",
+        )["route"]
+        p = route["paths"][0]
+        duration = (p.get("cost") or {}).get("duration") or p.get("duration") or 0
+        return {
+            "mode": "bike",
+            "distance_m": int(float(p.get("distance") or 0)),
+            "duration_s": int(float(duration or 0)),
+            "lines": [],
+            "polyline": [pt for s in p.get("steps") or [] for pt in _points(s.get("polyline"))],
+        }
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _taxi_fare(distance_m: int, duration_s: int = 0) -> int:
+    """粗略估算打车费：起步价 11 元/3km，之后约 2.6 元/km（不含夜间/等待）。"""
+    km = max(0.0, int(distance_m or 0) / 1000.0)
+    fare = 11.0 + max(0.0, km - 3.0) * 2.6
+    return max(11, int(round(fare)))
+
+
 def walking_route(origin: str, dest: str, cached_only: bool = False) -> dict | None:
     """独立查询步行路线，供餐厅排序使用；不把驾车距离当作步行距离。"""
     cache = _load_cache()
@@ -197,31 +277,50 @@ def driving_travel(origin: str, dest: str) -> dict | None:
 
 
 def route_leg(a: dict, b: dict) -> dict | None:
+    """计算 a→b 的多种交通方式：地铁（若有）、公交、打车（含价格）、<3km 骑行。"""
     cache = _load_cache()["leg"]
     origin = ",".join(f"{float(value):.6f}" for value in a["location"].split(","))
     dest = ",".join(f"{float(value):.6f}" for value in b["location"].split(","))
     key = f"{origin}>{dest}"
-    cached = cache.get(key) or cache.get(f"{a['location']}>{b['location']}")
-    if cached and not (cached.get("mode") == "walk" and cached.get("distance_m", 0) > 2500):
+    cached = cache.get(key)
+    if cached and isinstance(cached.get("options"), list):
         return cached
     km = _km(a["location"], b["location"])
+    options: list[dict] = []
+    if km < TRANSIT_MAX_KM and a.get("citycode"):
+        try:
+            options.extend(_transit_modes(a["location"], b["location"], a["citycode"]))
+        except Exception:  # noqa: BLE001
+            pass
+    drive: dict | None = None
     try:
-        leg = walking_route(a["location"], b["location"]) if km < WALK_MAX_KM else None
-        # 湖泊/围墙可能让很短的直线距离绕行数公里，不能一直选择步行。
-        if leg is None or leg.get("distance_m", 0) > 2500:
-            leg = None
-            if km < TRANSIT_MAX_KM and a.get("citycode"):
-                try:
-                    leg = _transit(a["location"], b["location"], a["citycode"])
-                except Exception:  # noqa: BLE001
-                    leg = None
-            if leg is None:
-                leg = _walk_or_drive("/v5/direction/driving", a["location"], b["location"], "drive")
+        drive = _walk_or_drive("/v5/direction/driving", a["location"], b["location"], "drive")
     except Exception:  # noqa: BLE001
+        drive = None
+    if drive and (drive.get("duration_s") or 0) > 0:
+        drive["label"] = "打车"
+        drive["price"] = _taxi_fare(drive.get("distance_m") or 0, drive.get("duration_s") or 0)
+        options.append(drive)
+    if km < 3.0:
+        bike = _bicycling(a["location"], b["location"])
+        if bike and (bike.get("duration_s") or 0) > 0:
+            bike["label"] = "骑行"
+            options.append(bike)
+    if not options:
         return None
+    # 地图折线优先用打车路线（连续道路），没有打车方案则退回首个可用方案。
+    primary = next((o for o in options if o.get("mode") == "drive"), options[0])
+    result = {
+        "mode": primary.get("mode") or "drive",
+        "distance_m": primary.get("distance_m") or 0,
+        "duration_s": primary.get("duration_s") or 0,
+        "lines": primary.get("lines") or [],
+        "polyline": primary.get("polyline") or [],
+        "options": [{k: v for k, v in o.items() if k != "polyline"} for o in options],
+    }
     with _lock:
-        cache[key] = leg
-    return leg
+        cache[key] = result
+    return result
 
 
 def _is_stop(block: dict) -> bool:
@@ -263,6 +362,23 @@ def geocode_blocks(blocks: list[dict], city: str) -> None:
             b["lng"], b["lat"] = float(lng), float(lat)
             b["poi_id"] = hit["poi_id"]
             b["_geo"] = hit
+    # 交通块：去程补到达站坐标、返程补出发站坐标，参与「车站↔酒店/景点」路线生成。
+    for block in blocks:
+        if block.get("type") != "交通" or block.get("_geo"):
+            continue
+        direction = block.get("direction") or ("去" if block.get("transport_direction") == "去程" else "回")
+        station = str(block.get("arr_station") if direction == "去" else block.get("dep_station") or "").strip()
+        if not station:
+            continue
+        hit = geocode(station, city)
+        if not hit:
+            continue
+        lng, lat = hit["location"].split(",")
+        block["lng"], block["lat"] = float(lng), float(lat)
+        block["poi_id"] = hit.get("poi_id") or ""
+        block["_geo"] = {"location": hit["location"], "poi_id": hit.get("poi_id") or "",
+                         "citycode": hit.get("citycode") or citycode}
+        block["station_name"] = station
     for block in stops:
         if block.get("_geo") and not block.get("link"):
             block["link"] = f"https://www.amap.com/place/{block['poi_id']}" if block.get("poi_id") else (

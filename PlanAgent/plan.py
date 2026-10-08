@@ -43,6 +43,11 @@ from trip_changes import resolve_trip_changes
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 ROOT = BASE_DIR.parent
+
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from agent_env import component_python
 sys.path.insert(0, str(ROOT))
 from shared.sources import merge_plan_sources
 from shared.audit import without_review
@@ -50,12 +55,12 @@ from shared.route_timing import LOCAL_TRANSFER_PADDING_S, MODE_LABELS
 from shared.model_config import MISSING_MODEL_API_KEY, model_api_key_configured
 
 SEARCH_PY = ROOT / "SearchAgent" / "search.py"
-SEARCH_PYTHON = ROOT / "SearchAgent" / ".venv" / "bin" / "python"
+SEARCH_PYTHON = component_python("SearchAgent")
 
 
 def _model_options() -> dict:
     # 规划、补全、编辑无需长思考，避免 Qwen 默认思考模式拖慢交互。
-    model = os.getenv("OPENAI_MODEL", "qwen3.8-27b").lower()
+    model = os.getenv("OPENAI_MODEL", "deepseek-v4.1-flash").lower()
     if "qwen" in model or "deepseek" in model:
         return {"extra_body": {"enable_thinking": False}}
     return {}
@@ -452,7 +457,7 @@ def _embedding_client_instance():
         api_key = os.getenv("EMBEDDING_API_KEY") or os.getenv("OPENAI_API_KEY") or ""
         if not base_url or not api_key:
             return None
-        _embedding_client = OpenAI(api_key=api_key, base_url=base_url)
+        _embedding_client = OpenAI(api_key=api_key, base_url=base_url, max_retries=0, timeout=20)
     return _embedding_client
 
 
@@ -460,10 +465,25 @@ def _embed_texts(client, texts: list[str]) -> list[list[float]] | None:
     """批量把文本转成向量；失败返回 None。"""
     if not texts:
         return []
-    model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+    model = os.getenv("EMBEDDING_MODEL", "qwen3.7-text-embedding")
+    vectors = []
     try:
-        resp = client.embeddings.create(model=model, input=texts)
-        return [item.embedding for item in resp.data]
+        for offset in range(0, len(texts), 20):
+            batch = texts[offset:offset + 20]
+            resp = client.embeddings.create(model=model, input=batch, encoding_format="float")
+            items = sorted(resp.data, key=lambda item: item.index)
+            if [item.index for item in items] != list(range(len(batch))):
+                return None
+            batch_vectors = [item.embedding for item in items]
+            if any(not isinstance(vector, list) or not vector for vector in batch_vectors):
+                return None
+            dimension = len(vectors[0]) if vectors else len(batch_vectors[0])
+            if any(len(vector) != dimension or any(
+                    not isinstance(value, (int, float)) or not math.isfinite(value) for value in vector)
+                   for vector in batch_vectors):
+                return None
+            vectors.extend(batch_vectors)
+        return vectors
     except Exception:
         return None
 
@@ -528,7 +548,7 @@ def _apply_match_scores(pois: list[dict], profile, preferences, basic) -> None:
     user_text = _user_match_text(profile, preferences, basic)
     if not user_text.strip():
         return
-    model = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+    model = os.getenv("EMBEDDING_MODEL", "qwen3.7-text-embedding")
     cache = _load_embedding_cache()
     poi_vecs: list[list[float] | None] = [None] * len(pois)
     to_embed: list[tuple[int, str, str]] = []
@@ -1540,7 +1560,7 @@ def _build_day_plan(
     for _ in range(2):
         try:
             resp = _chat_completion(client,
-                model=os.getenv("OPENAI_MODEL", "qwen3.8-27b"),
+                model=os.getenv("OPENAI_MODEL", "deepseek-v4.1-flash"),
                 messages=[
                     {"role": "system", "content": DAY_PLAN_PROMPT},
                     {"role": "user", "content": json.dumps(ctx, ensure_ascii=False)},
@@ -2093,6 +2113,8 @@ def refresh_food_for_plan(
             proc = subprocess.run(
                 [str(python) if python.exists() else sys.executable, str(SEARCH_PY), "--food-nearby"],
                 input=json.dumps(payload, ensure_ascii=False), capture_output=True, text=True,
+                                                                                    encoding="utf-8",
+                                                                                    errors="replace",
                 timeout=max(60, min(300, len(anchors) * 30)), env=env,
             )
             nearby = json.loads(proc.stdout or "{}")
@@ -2472,6 +2494,8 @@ def _search_hotels(
             input=json.dumps(payload, ensure_ascii=False),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=120,
             env=env,
         )
@@ -2884,7 +2908,7 @@ def modify_blocks(
         context["basic"] = basic
 
     resp = _chat_completion(client,
-        model=os.getenv("OPENAI_MODEL", "qwen3.8-27b"),
+        model=os.getenv("OPENAI_MODEL", "deepseek-v4.1-flash"),
         messages=[
             {"role": "system", "content": MODIFY_PROMPT},
             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
@@ -2965,7 +2989,7 @@ def classify_modify(client: OpenAI, instruction: str, blocks: list[dict]) -> dic
         for b in blocks
     ]
     resp = _chat_completion(client,
-        model=os.getenv("OPENAI_MODEL", "qwen3.8-27b"),
+        model=os.getenv("OPENAI_MODEL", "deepseek-v4.1-flash"),
         messages=[
             {"role": "system", "content": CLASSIFY_MODIFY_PROMPT},
             {
@@ -3042,7 +3066,7 @@ def _modify_block_local(
         context["basic"] = basic
 
     resp = _chat_completion(client,
-        model=os.getenv("OPENAI_MODEL", "qwen3.8-27b"),
+        model=os.getenv("OPENAI_MODEL", "deepseek-v4.1-flash"),
         messages=[
             {"role": "system", "content": BLOCK_MODIFY_PROMPT},
             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
@@ -3348,7 +3372,7 @@ def _modified_plan_reply(client, messages: list[dict], *, repairing=False, expec
     reason = "规划模型没有返回完整日程"
     for attempt in range(2 if repairing else 1):
         try:
-            resp = _chat_completion(client, model=os.getenv("OPENAI_MODEL", "qwen3.8-27b"),
+            resp = _chat_completion(client, model=os.getenv("OPENAI_MODEL", "deepseek-v4.1-flash"),
                                     messages=request_messages, response_format={"type": "json_object"},
                                     max_tokens=16000, timeout=120 if repairing else 300)
         except json.JSONDecodeError:

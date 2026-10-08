@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
+import type { KeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { api } from '../api/client';
 import { TripMap } from '../components/TripMap';
 import type { RouteBlock, RouteLeg } from '../components/TripMap';
@@ -7,9 +7,30 @@ import { TripQuestions } from '../components/TripQuestions';
 import type { TripQuestion } from '../components/TripQuestions';
 import { usePlanStream } from '../hooks/usePlanStream';
 import { advanceReviewProgress, canAutoRepair, confirmationReason, currentAudit, issueTarget, missingApiKeyMessage, reviewMessage } from '../lib/planReview';
+import { addTimeRange, ambiguousDeleteChoices, matchingSpots, mutationErrorMessage } from '../lib/planAdd';
+import type { DeleteChoice } from '../lib/planAdd';
 import CityGuide from '../components/CityGuide';
 import { PlanReviewWindow } from '../components/PlanReviewWindow';
 import type { AuditIssue, PlanAudit, ReviewContext, ReviewProgress } from '../lib/planReview';
+
+// Compact map size follows the final responsive rules in index.css.
+// Recompute on opening so the map always starts at the bottom-right.
+function getMapDockPosition() {
+  if (typeof window === 'undefined') return { x: 760, y: 520 };
+
+  const mobile = window.innerWidth <= 760;
+  const width = Math.min(mobile ? 340 : 360, window.innerWidth - (mobile ? 24 : 32));
+  const height = mobile
+    ? Math.min(292, window.innerHeight - 84)
+    : window.innerHeight <= 760
+      ? Math.min(300, window.innerHeight - 88)
+      : Math.min(318, window.innerHeight - 96);
+
+  return {
+    x: Math.max(12, window.innerWidth - width - 24),
+    y: Math.max(68, window.innerHeight - height - 10),
+  };
+}
 
 type ChatMessage = {
   id: string;
@@ -454,6 +475,7 @@ export function AgentPage() {
     Array<{ platform: string; title: string; url: string }>
   >([]);
   const [pendingAdd, setPendingAdd] = useState<OptionItem | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<DeleteChoice[] | null>(null);
   const [tripData, setTripData] = useState<Record<string, unknown>>({});
   const [collectingTrip, setCollectingTrip] = useState(false);
   const [pendingConfirm, setPendingConfirm] = useState<{
@@ -500,19 +522,10 @@ export function AgentPage() {
     return () => window.clearInterval(timer);
   }, [planning]);
   const [reviewProgress, setReviewProgress] = useState<ReviewProgress | null>(null);
-  const [mapPosition, setMapPosition] = useState(() => {
-    if (typeof window === 'undefined') return { x: 760, y: 520 };
-
-    const defaultWidth = Math.min(360, window.innerWidth - 32);
-    const defaultHeight = Math.min(318, window.innerHeight - 96);
-
-    return {
-      x: Math.max(12, window.innerWidth - defaultWidth - 24),
-      y: Math.max(68, window.innerHeight - defaultHeight - 10),
-    };
-  });
+  const [mapPosition, setMapPosition] = useState(getMapDockPosition);
   const [isMapExpanded, setIsMapExpanded] = useState(false);
-  const [isMapHidden, setIsMapHidden] = useState(false);
+  // Both floating windows start folded, as small tabs at the right edge.
+  const [isMapHidden, setIsMapHidden] = useState(true);
   const mapDragRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
   const { start: startPlanStream, stop: stopPlanStream } = usePlanStream();
 
@@ -710,6 +723,9 @@ export function AgentPage() {
       unpriced_items: plan.unpriced_items as RoutePlan['unpriced_items'], suggestions: plan.suggestions as PlanSuggestions | undefined,
     };
     setRoutePlan(snapshot);
+    // Open the generated itinerary immediately; the old cover/selection screen is no longer needed.
+    setExpandedStyle(previous => previous && snapshot.styles.includes(previous)
+      ? previous : snapshot.styles[0] ?? null);
     setConfirmedStyle(null);
     setSaveState('idle');
     if (raw.search && typeof raw.search === 'object') {
@@ -765,7 +781,6 @@ export function AgentPage() {
     setPlanning(true);
     setReviewProgress(advanceReviewProgress(null, {stage:'planning',repair_count:0}));
     setRoutePlan(previous => previous ? {...previous,audit:null,review_pending:true} : previous);
-    setExpandedStyle(null);
     setSelectedBlocks(new Set());
     await startPlanStream(payload, event => {
       if (version !== planRequestVersionRef.current) return;
@@ -890,9 +905,18 @@ export function AgentPage() {
       return true;
     } catch (error) {
       if ((error as Error).name === 'AbortError' || controller.signal.aborted || requestControllerRef.current !== controller || version !== planRequestVersionRef.current) return false;
-      workflowFailed(error instanceof Error ? error.message : String(error));
+      const choices = ambiguousDeleteChoices(error)?.filter(choice =>
+        routePlan.blocks.some(block => block.id === choice.id && (block.plan_style || '推荐方案') === choice.plan_style));
+      if (choices?.length) {
+        setPendingDelete(choices);
+        setReviewProgress(previous => advanceReviewProgress(previous, {stage:'cancelled'}));
+        updateLastAssistantMessage('找到多个同名或相似的计划条目，请在下面选择要删除的那一项。');
+        return false;
+      }
+      const message = mutationErrorMessage(error);
+      workflowFailed(message);
       updateLastAssistantMessage(
-        `修改失败：${error instanceof Error ? error.message : String(error)}`,
+        `修改失败：${message}`,
       );
       return false;
     } finally {
@@ -953,6 +977,7 @@ export function AgentPage() {
     try {
       setTripConfirm(null);
       setPendingConfirm(null);
+      setPendingDelete(null);
       if (routePlan && !collectingTrip && selectedBlocks.size > 0) {
         addAssistantMessage('正在按你的需求调整选中的计划项…');
         await modifyPlan(content, 'block');
@@ -1010,6 +1035,37 @@ export function AgentPage() {
         await startTripPlan(data);
         return;
       }
+      if (action === 'add' && routePlan) {
+        const query = String(result.query ?? '').trim();
+        if (!query) throw new Error('请说出想加入的景点名称。');
+        const currentStyle = expandedStyle || activeStyle || routePlan.styles[0];
+        const scheduled = matchingSpots(query, routePlan.destination,
+          routePlan.blocks.filter(block => block.type === '景点' && (!currentStyle || (block.plan_style || '推荐方案') === currentStyle))
+            .map(block => ({ title: block.name, day: block.day })));
+        if (scheduled.length) {
+          const days = Array.from(new Set(scheduled.map(spot => spot.day))).sort((left, right) => left - right);
+          addAssistantMessage(`「${query}」已安排在${days.map(day => `第${day}天`).join('、')}；如果想调整它，请在计划中选中这条行程再描述需求。`);
+          return;
+        }
+        const known = matchingSpots(query, routePlan.destination,
+          options.filter((item): item is SpotOption => item.type === 'spot'));
+        let matches = known;
+        if (!matches.length) {
+          addAssistantMessage(`正在查找「${query}」…`);
+          const found = await api.searchPoi({ destination: routePlan.destination, keyword: query }, controller.signal);
+          if (requestVersion !== intentVersionRef.current) return;
+          matches = matchingSpots(query, routePlan.destination,
+            mapSpots(found.poi).map((spot, index) => ({ ...spot, id: `poi-search-${index}` })));
+          if (!matches.length) {
+            updateLastAssistantMessage(`没查到${routePlan.destination}的「${query}」。请核对景点名称，或从右侧搜索结果中选择。`);
+            return;
+          }
+          updateLastAssistantMessage(`已找到「${matches[0].title}」。`);
+        }
+        const day = Number(result.day);
+        openAddDayQuestion(matches[0], Number.isInteger(day) && day > 0 ? day : undefined, true);
+        return;
+      }
       if (action === 'confirm') {
         setPendingConfirm({
           summary: String(result.summary ?? ''),
@@ -1053,7 +1109,7 @@ export function AgentPage() {
     } catch (error) {
       if ((error as Error).name === 'AbortError' || requestVersion !== intentVersionRef.current) return;
       addAssistantMessage(
-        `处理失败：${error instanceof Error ? error.message : String(error)}`,
+        `处理失败：${mutationErrorMessage(error)}`,
       );
     } finally {
       if (requestVersion === intentVersionRef.current) setPlanning(false);
@@ -1085,6 +1141,14 @@ export function AgentPage() {
     await modifyPlan(confirm.instruction, confirm.mode, confirm.targets);
   }
 
+  async function deleteChosenItem(choice: DeleteChoice) {
+    if (planning || !routePlan || !routePlan.blocks.some(block => block.id === choice.id && (block.plan_style || '推荐方案') === choice.plan_style)) return;
+    setPendingDelete(null);
+    addAssistantMessage(`正在移除第${choice.day}天的「${choice.name}」…`);
+    await mutatePlan({ action: 'delete', plan_style: choice.plan_style, block_ids: [choice.id] },
+      `已移除第${choice.day}天的「${choice.name}」，计划与地图已同步。`);
+  }
+
 
 
   function handleSend() {
@@ -1092,18 +1156,21 @@ export function AgentPage() {
     if (!content || planning) return;
 
     if (pendingAdd) {
-      setMessages((prev) => [
-        ...prev,
-        { id: buildId(), role: 'user', content },
-      ]);
-      clearComposer();
-      if (/不加|取消|算了|不要/.test(content)) {
+      if (/^(?:不加了?|取消(?:添加)?|算了|不要加了?)$/.test(content)) {
+        setMessages(prev => [...prev, { id: buildId(), role: 'user', content }]);
+        clearComposer();
         setPendingAdd(null);
         addAssistantMessage('好的，已取消添加。');
         return;
       }
-      handleAddReply(content);
-      return;
+      const dayReply = /^[1-9]\d?$/.test(content) ? `第${content}天` : content;
+      if (/第?\s*(?:\d+|[一二三四五六七八九十]+)\s*天|\b\d{1,2}:\d{2}\b/.test(dayReply)) {
+        setMessages(prev => [...prev, { id: buildId(), role: 'user', content }]);
+        clearComposer();
+        void handleAddReply(dayReply);
+        return;
+      }
+      setPendingAdd(null);
     }
 
     setMessages((prev) => [
@@ -1119,6 +1186,7 @@ export function AgentPage() {
     setQuestion(null);
     setTripConfirm(null);
     setPendingConfirm(null);
+    setPendingDelete(null);
     void resolveIntent(history, content);
   }
 
@@ -1182,9 +1250,13 @@ export function AgentPage() {
   }
 
   function startAdd(item: OptionItem) {
-    if (!routePlan || planning) return;
+    openAddDayQuestion(item);
+  }
+
+  function openAddDayQuestion(item: OptionItem, preferredDay?: number, fromIntent = false) {
+    if (!routePlan || (planning && !fromIntent)) return;
     setPendingAdd(item);
-    const day = item.suggestedDay || (activeDay !== 'all' ? activeDay : 1);
+    const day = preferredDay || item.suggestedDay || (activeDay !== 'all' ? activeDay : 1);
     setAddDay(Math.min(getPlanDayCount(routePlan), Math.max(1, day)));
     setAddTime('');
     addAssistantMessage(`把「${item.title}」安排在哪一天？可在下面选择，也可以回复“第2天 14:00”。`);
@@ -1200,7 +1272,12 @@ export function AgentPage() {
       addAssistantMessage(`当前行程是${maxDay}天，请选择第1到第${maxDay}天。`);
       return;
     }
-    const time = content.match(/(\d{1,2}:\d{2})/)?.[1] || addTime;
+    const suppliedTime = content.match(/\b\d{1,2}:\d{2}(?:\s*[-—~至]\s*\d{1,2}:\d{2})?\b/)?.[0] || addTime;
+    const time = addTimeRange(suppliedTime);
+    if (time === null) {
+      addAssistantMessage('时间请填写 00:00–23:00 内的开始时间，或有效的开始和结束时间。');
+      return;
+    }
     const item: Record<string, unknown> = {
       name: pendingAdd.title, type: optionToBlockType(pendingAdd), note: pendingAdd.description,
       link: pendingAdd.url || '', lng: pendingAdd.lng, lat: pendingAdd.lat,
@@ -1456,6 +1533,13 @@ export function AgentPage() {
             </div>
           </div>
 
+          {generation && (
+            <div className="ta-chat-status">
+              <CityGuide key={generation.id} destination={generation.destination}
+                progress={generation.progress} status={generation.status} />
+            </div>
+          )}
+
           <div className="ta-chat-messages">
             {messages.map((message) => {
               const confirmFields = message.tripConfirmData
@@ -1561,8 +1645,6 @@ export function AgentPage() {
                 </div>
               ) : null;
             })()}
-            {generation && <CityGuide key={generation.id} destination={generation.destination}
-              progress={generation.progress} status={generation.status} />}
           </div>
 
           {question && (
@@ -1573,7 +1655,7 @@ export function AgentPage() {
           {pendingAdd && routePlan && (
             <div className="ta-clarify-card">
               <div className="ta-clarify-title">安排「{pendingAdd.title}」</div>
-              <div className="ta-clarify-row">
+              <div className="ta-clarify-row ta-add-schedule-row">
                 <label>日期
                   <select value={addDay} onChange={(event) => setAddDay(Number(event.target.value))} disabled={planning}>
                     {Array.from({ length: getPlanDayCount(routePlan) }, (_, index) => index + 1)
@@ -1584,10 +1666,24 @@ export function AgentPage() {
                   <input type="time" value={addTime} onChange={(event) => setAddTime(event.target.value)} disabled={planning} />
                 </label>
               </div>
-              <p className="ta-question-hint">不填时间时，系统会安排空档；餐厅和酒店优先替换当天已有推荐。</p>
+              <p className="ta-question-hint">不填时间时，系统会安排空档；填写开始时间时默认安排1小时。餐厅和酒店优先替换当天已有推荐。</p>
               <button type="button" className="ta-clarify-submit" disabled={planning}
                 onClick={() => void handleAddReply(`第${addDay}天 ${addTime}`)}>加入当天计划</button>
               <button type="button" className="ta-clarify-option" disabled={planning} onClick={() => setPendingAdd(null)}>取消</button>
+            </div>
+          )}
+
+          {pendingDelete && (
+            <div className="ta-clarify-card">
+              <div className="ta-clarify-title">选择要删除的计划条目</div>
+              {pendingDelete.map(choice => (
+                <button key={choice.id} type="button" className="ta-clarify-option" disabled={planning}
+                  onClick={() => void deleteChosenItem(choice)}>
+                  第{choice.day}天 {choice.time} · {choice.name}
+                </button>
+              ))}
+              <button type="button" className="ta-clarify-option" disabled={planning}
+                onClick={() => setPendingDelete(null)}>取消</button>
             </div>
           )}
 
@@ -1658,9 +1754,25 @@ export function AgentPage() {
         <section className="ta-plan-card ta-plan-column">
           {expandedStyle && routePlan ? (
             <div className="ta-plan-detail">
-              <button type="button" className="ta-plan-detail-back" onClick={() => setExpandedStyle(null)}>
-                ← 返回方案列表
-              </button>
+              <div className="ta-plan-detail-toolbar">
+                <span className="ta-plan-detail-toolbar-label">旅行计划</span>
+                {routePlan.styles.length > 1 && (
+                  <div className="ta-plan-style-switch" role="group" aria-label="切换旅行方案">
+                    {routePlan.styles.map(style => (
+                      <button
+                        key={style}
+                        type="button"
+                        className={expandedStyle === style ? 'active' : ''}
+                        aria-pressed={expandedStyle === style}
+                        onClick={() => chooseStyle(style)}
+                        disabled={planning}
+                      >
+                        {style}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="ta-plan-detail-title">
                 <strong>{expandedStyle}</strong>
                 <p>{routePlan.summaries[expandedStyle] ?? ''}</p>
@@ -1916,31 +2028,7 @@ export function AgentPage() {
           ) : (
             <div className="ta-plan-empty">
               {routePlan && routePlan.styles.length > 0 ? (
-                <div className="ta-plan-styles">
-                  <div className="ta-plan-styles-hint">选择一个方案查看详情</div>
-                  {routePlan.styles.map((style) => (
-                    <button
-                      key={style}
-                      type="button"
-                      className={`ta-plan-style-card${
-                        expandedStyle === style ? ' active' : ''
-                      }${routePlan.suggestions?.cover_image ? ' has-image' : ''}`}
-                      style={
-                        routePlan.suggestions?.cover_image
-                          ? ({
-                              '--cover-image': `url("${routePlan.suggestions.cover_image}")`,
-                            } as CSSProperties)
-                          : undefined
-                      }
-                      onClick={() => chooseStyle(style)}
-                    >
-                      <span className="ta-plan-style-name">{style}</span>
-                      <p className="ta-plan-style-summary">
-                        {routePlan.summaries[style] ?? ''}
-                      </p>
-                    </button>
-                  ))}
-                </div>
+                <div className="ta-plan-loading">正在整理方案详情…</div>
               ) : (
                 <>
                   <div>先在左侧描述旅行需求，生成后可把右侧候选加入行程。</div>
@@ -2116,15 +2204,20 @@ export function AgentPage() {
       </div>
 
       {/* 悬浮地图：拖动标题栏可以自由移动 */}
-      {(routePlan || reviewProgress) && <PlanReviewWindow
+      <PlanReviewWindow
+        mapDock={isMapExpanded ? getMapDockPosition() : mapPosition}
         plan={routePlan ?? {blocks:[],review_pending:planning}} busy={planning} progress={reviewProgress}
-        onLocate={locateReviewIssue} onRetry={() => void retryReview()} onRepair={() => void retryReview()} />}
+        onLocate={locateReviewIssue} onRetry={() => void retryReview()} onRepair={() => void retryReview()} />
 
       {isMapHidden && (
         <button
           type="button"
           className="ta-map-side-tab"
-          onClick={() => setIsMapHidden(false)}
+          onClick={() => {
+            setMapPosition(getMapDockPosition());
+            setIsMapExpanded(false);
+            setIsMapHidden(false);
+          }}
           aria-label="显示地图"
         >
           <span className="ta-map-side-arrow">◀</span>

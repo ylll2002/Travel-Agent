@@ -41,6 +41,42 @@ class QuestionResponseTests(unittest.TestCase):
         self.assertEqual(client.max_retries, 0)
         self.assertEqual(self.payload["trip_data"], PREVIOUS)
 
+    def test_deepseek_flash_disables_thinking_for_json_and_schema_correction(self):
+        client = self.client(["{broken", VALID])
+        with patch.dict("agent.os.environ", {
+            "OPENAI_MODEL": "deepseek-v4.1-flash",
+            "OPENAI_BASE_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        }):
+            result = resolve_intent(self.payload, client)
+        self.assertEqual(result["action"], "confirm_trip")
+        self.assertEqual(result["data"]["destination"], PREVIOUS["destination"])
+        self.assertEqual(client.chat.completions.create.call_count, 2)
+        for call in client.chat.completions.create.call_args_list:
+            self.assertEqual(call.kwargs["model"], "deepseek-v4.1-flash")
+            self.assertEqual(call.kwargs["extra_body"], {"enable_thinking": False})
+            self.assertEqual(call.kwargs["response_format"], {"type": "json_object"})
+        self.assertEqual(self.payload["trip_data"], PREVIOUS)
+
+    def test_qwen_still_disables_thinking_for_json(self):
+        client = self.client([VALID])
+        with patch.dict("agent.os.environ", {"OPENAI_MODEL": "qwen3.8-max"}):
+            result = resolve_intent(self.payload, client)
+        self.assertEqual(result["action"], "confirm_trip")
+        kwargs = client.chat.completions.create.call_args.kwargs
+        self.assertEqual(kwargs["model"], "qwen3.8-max")
+        self.assertEqual(kwargs["extra_body"], {"enable_thinking": False})
+        self.assertEqual(kwargs["response_format"], {"type": "json_object"})
+
+    def test_deepseek_flash_missing_key_preserves_trip_without_model_call(self):
+        with patch.dict("agent.os.environ", {
+            "OPENAI_MODEL": "deepseek-v4.1-flash", "OPENAI_API_KEY": "",
+        }, clear=True), patch("agent.OpenAI") as constructor:
+            result = resolve_intent(self.payload)
+        self.assertIn("未配置模型 API Key", result["error"])
+        self.assertEqual(result["data"], PREVIOUS)
+        self.assertEqual(self.payload["trip_data"], PREVIOUS)
+        constructor.assert_not_called()
+
     def test_unique_object_array_is_unwrapped_without_retry(self):
         client = self.client([[VALID]])
         result = resolve_intent(self.payload, client)
@@ -110,6 +146,77 @@ class QuestionResponseTests(unittest.TestCase):
         result = resolve_intent({**self.payload, "has_plan": True}, client)
         self.assertEqual(result, valid)
         self.assertEqual(client.chat.completions.create.call_count, 2)
+
+    def test_new_poi_returns_add_query_without_an_existing_block_target(self):
+        client = self.client([{"action": "add", "query": " 灵隐寺 "}])
+        payload = {**self.payload, "has_plan": True, "messages": [{"role": "user", "content": "我想去灵隐寺"}]}
+        result = resolve_intent(payload, client)
+        self.assertEqual(result, {"action": "add", "query": "灵隐寺"})
+        self.assertNotIn("targets", result)
+        self.assertNotIn("day", result)
+        self.assertEqual(payload["trip_data"], PREVIOUS)
+        self.assertEqual(client.chat.completions.create.call_count, 1)
+
+    def test_new_poi_can_carry_an_explicit_day_for_the_add_question(self):
+        expected = {"action": "add", "query": "雷峰塔", "day": 2}
+        client = self.client([expected])
+        payload = {**self.payload, "has_plan": True, "messages": [{"role": "user", "content": "第二天再加一个雷峰塔"}]}
+        self.assertEqual(resolve_intent(payload, client), expected)
+        self.assertEqual(client.chat.completions.create.call_count, 1)
+
+    def test_invalid_add_query_is_corrected_before_returning_an_add_action(self):
+        valid = {"action": "add", "query": "灵隐寺"}
+        for query in (None, "", "   ", [], 42):
+            with self.subTest(query=query):
+                client = self.client([{"action": "add", "query": query}, valid])
+                result = resolve_intent({**self.payload, "has_plan": True}, client)
+                self.assertEqual(result, valid)
+                self.assertEqual(client.chat.completions.create.call_count, 2)
+
+    def test_invalid_add_day_is_not_coerced_to_a_chosen_day(self):
+        valid = {"action": "add", "query": "灵隐寺"}
+        for day in (0, -1, True, 1.5, "2", None):
+            with self.subTest(day=day):
+                client = self.client([{"action": "add", "query": "灵隐寺", "day": day}, valid])
+                result = resolve_intent({**self.payload, "has_plan": True}, client)
+                self.assertEqual(result, valid)
+                self.assertEqual(client.chat.completions.create.call_count, 2)
+
+    def test_add_without_a_plan_is_corrected_to_trip_information_collection(self):
+        client = self.client([
+            {"action": "add", "query": "灵隐寺"},
+            {"action": "collect", "data": {"requested_pois": ["灵隐寺"]}},
+        ])
+        payload = {**self.payload, "has_plan": False, "messages": [{"role": "user", "content": "我想去灵隐寺"}]}
+        result = resolve_intent(payload, client)
+        self.assertEqual(result["action"], "confirm_trip")
+        self.assertEqual(result["data"]["requested_pois"], ["灵隐寺"])
+        self.assertEqual(result["data"]["destination"], PREVIOUS["destination"])
+        self.assertEqual(client.chat.completions.create.call_count, 2)
+
+    def test_add_schema_correction_keeps_the_original_plan_context(self):
+        client = self.client([{"action": "add", "query": []}, {"action": "add", "query": "灵隐寺"}])
+        payload = {**self.payload, "has_plan": True, "messages": [{"role": "user", "content": "我想去灵隐寺"}]}
+        self.assertEqual(resolve_intent(payload, client), {"action": "add", "query": "灵隐寺"})
+        retry = client.chat.completions.create.call_args_list[1].kwargs["messages"]
+        original = json.loads(retry[1]["content"])
+        self.assertTrue(original["has_plan"])
+        self.assertEqual(original["messages"], payload["messages"])
+        self.assertEqual(original["trip_data"], PREVIOUS)
+        self.assertIn("explain/add/confirm/modify", retry[-1]["content"])
+
+    def test_replacement_delete_and_explanation_keep_their_existing_actions(self):
+        cases = [
+            ("把西湖换成灵隐寺", {"action": "confirm", "mode": "block", "targets": ["西湖"], "instruction": "把西湖换成灵隐寺"}),
+            ("删除灵隐寺", {"action": "confirm", "mode": "block", "targets": ["灵隐寺"], "instruction": "删除灵隐寺"}),
+            ("灵隐寺怎么样", {"action": "explain", "answer": "灵隐寺是一座位于杭州的寺院。", "query": "灵隐寺"}),
+        ]
+        for content, expected in cases:
+            with self.subTest(content=content):
+                client = self.client([expected])
+                payload = {**self.payload, "has_plan": True, "messages": [{"role": "user", "content": content}]}
+                self.assertEqual(resolve_intent(payload, client), expected)
+                self.assertEqual(client.chat.completions.create.call_count, 1)
 
     def test_model_cannot_clear_previous_trip_with_string_new_trip_flag(self):
         client = self.client([{"action": "collect", "new_trip": "true", "data": {"total_budget": 6000}}, VALID])

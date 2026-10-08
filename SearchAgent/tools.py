@@ -32,6 +32,9 @@ from tavily import TavilyClient
 from amap_service import search_restaurants
 
 BASE_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(BASE_DIR.parent))
+from agent_env import subprocess_env  # noqa: E402
+
 load_dotenv(BASE_DIR / ".env")
 
 CACHE_DIR = BASE_DIR / "cache"
@@ -105,7 +108,30 @@ RESTAURANT_PROMPT = (
 )
 
 
-FLYAI_BIN = Path(__file__).resolve().parent / "node_modules" / ".bin" / "flyai"
+def _flyai_bin() -> Path:
+    """定位 npm 安装的 flyai CLI 入口。
+
+    npm 为同一个 bin 生成的启动器在不同平台不一样：
+
+    * macOS / Linux：无扩展名的可执行 shell 脚本（带 shebang，内核可直接执行）
+    * Windows：``flyai.cmd``（供 cmd.exe）与 ``flyai.ps1``（供 PowerShell）
+
+    Windows 上虽然也存在无扩展名的 ``flyai``，但它是 ``#!/bin/sh`` 脚本，
+    直接执行会报 ``OSError: [WinError 193] 不是有效的 Win32 应用程序``。
+    因此必须按平台选择可执行的启动器。
+    """
+    bin_dir = Path(__file__).resolve().parent / "node_modules" / ".bin"
+    if os.name == "nt":
+        candidates = (bin_dir / "flyai.cmd", bin_dir / "flyai.exe", bin_dir / "flyai")
+    else:
+        candidates = (bin_dir / "flyai", bin_dir / "flyai.cmd")
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return candidates[0]
+
+
+FLYAI_BIN = _flyai_bin()
 
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
 FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
@@ -144,8 +170,23 @@ def _http_get_json(url: str) -> dict:
 
 
 def _run_flyai(args: list[str]) -> dict:
+    """调用 flyai CLI 并解析其 JSON 输出。"""
+    if not FLYAI_BIN.is_file():
+        raise RuntimeError(
+            f"未找到 flyai CLI：{FLYAI_BIN}\n"
+            "请在 SearchAgent 目录执行 `npm install` 安装 Node 依赖"
+            "（依赖声明于 SearchAgent/package.json）。"
+        )
     cmd = [str(FLYAI_BIN), *args]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=FLYAI_TIMEOUT)
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=FLYAI_TIMEOUT,
+        env=subprocess_env(),
+    )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
         raise RuntimeError(f"flyai 调用失败：{detail}")
@@ -507,7 +548,7 @@ def _extract_poi_features(pois: list[dict]) -> list[dict]:
             for p in pois
         ]
         resp = client.chat.completions.create(
-            model=os.getenv("OPENAI_MODEL", "qwen3.8-27b"),
+            model=os.getenv("OPENAI_MODEL", "deepseek-v4.1-flash"),
             messages=[
                 {"role": "system", "content": POI_FEATURE_PROMPT},
                 {"role": "user", "content": json.dumps(brief, ensure_ascii=False)},
@@ -556,7 +597,7 @@ def _extract_item_features(items: list[dict], prompt: str) -> list[dict]:
             for x in items
         ]
         resp = client.chat.completions.create(
-            model=os.getenv("OPENAI_MODEL", "qwen3.8-27b"),
+            model=os.getenv("OPENAI_MODEL", "deepseek-v4.1-flash"),
             messages=[
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": json.dumps(brief, ensure_ascii=False)},
@@ -867,7 +908,7 @@ def _extract_events(items: list[dict]) -> list[dict]:
             for x in items
         ]
         resp = client.chat.completions.create(
-            model=os.getenv("OPENAI_MODEL", "qwen3.8-27b"),
+            model=os.getenv("OPENAI_MODEL", "deepseek-v4.1-flash"),
             messages=[
                 {"role": "system", "content": EVENT_EXTRACT_PROMPT},
                 {"role": "user", "content": json.dumps({"results": brief}, ensure_ascii=False)},

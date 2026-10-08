@@ -123,6 +123,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  searchPoi: (payload: { destination: string; keyword: string }, signal?: AbortSignal) =>
+    request<{ poi: unknown[] }>('/search/poi', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      signal,
+    }),
   question: (payload: {
     messages: ChatMessage[];
     has_plan?: boolean;

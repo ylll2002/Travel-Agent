@@ -165,7 +165,10 @@ class DeleteMutationIntegrationTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as raised:
             create_plan(self.make_request({"instruction": "删掉雕塑园", "plan_style": "经典"}, blocks=repeated))
         self.assertEqual(raised.exception.status_code, 422)
-        self.assertIn("选择", raised.exception.detail)
+        self.assertEqual(raised.exception.detail["code"], "ambiguous_delete")
+        self.assertEqual([candidate["id"] for candidate in raised.exception.detail["candidates"]],
+                         ["sculpture", "day2-sculpture"])
+        self.assertIn("选择", raised.exception.detail["message"])
         self.assertEqual(self.finalizer_inputs, [])
 
     def test_partial_name_matching_multiple_distinct_places_requires_selection(self):
@@ -173,7 +176,9 @@ class DeleteMutationIntegrationTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as raised:
             create_plan(self.make_request({"instruction": "把雕塑园删了", "plan_style": "经典"}, blocks=repeated))
         self.assertEqual(raised.exception.status_code, 422)
-        self.assertIn("选择", raised.exception.detail)
+        self.assertEqual(raised.exception.detail["code"], "ambiguous_delete")
+        self.assertEqual([candidate["name"] for candidate in raised.exception.detail["candidates"]],
+                         [SCULPTURE_NAME, "海滨雕塑园"])
         self.assertEqual(self.finalizer_inputs, [])
 
     def test_unmatched_delete_name_does_not_replan_or_delete_another_stop(self):

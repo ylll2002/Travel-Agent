@@ -6,6 +6,7 @@
 输出（stdout JSON）：
   {"action":"ask","missing":[...],"data":{...},"question":"...","questions":[{"field":"start_date","question":"...","options":["..."]}]}
   {"action":"confirm_trip","data":{destination,start_date,end_date,origin,travelers,total_budget,...}}
+  {"action":"add","query":"用户点名要加入的景点名称","day":2}
   {"action":"modify","mode":"global|block","targets":[...],"instruction":"..."}
 """
 
@@ -66,14 +67,22 @@ SYSTEM_PROMPT = (
     "不要问已知字段、兴趣、预算档位、交通方式或餐饮偏好等非必要问题。问卷建议不写入 data。"
     "如果已有计划但用户明确要另起一次新旅行（如另开一个新行程、重新开始规划），输出 new_trip=true，"
     "data 只提取这次新旅行的信息。仅修改选中的行程、日期、预算或目的地不代表另一次新旅行，应按修改处理。\n"
-    "2) 如果 has_plan=true 且用户是在修改已有方案，先归纳修改意图，输出："
+    "2) 如果 has_plan=true，用户想在当前旅行中新增一个具体景点（如'我想去灵隐寺'、'再加一个雷峰塔'、'第二天加上灵隐寺'），"
+    '输出 {"action":"add","query":"具体景点名称"}；只有用户明确指定第几天时才加上 day 字段（正整数）。'
+    "新增景点先交给程序查找真实地点并询问加入哪一天，不要输出 confirm/modify，不要把新地点放到已有条目的 targets 中，"
+    "不要自行编造地址、坐标、票价或默认安排到某一天。"
+    "action=add 仅用于当前旅行新增景点，不用于点餐、换酒店、改车票、介绍景点、修改目的地或另起新旅行。"
+    "用户明确说'把西湖换成灵隐寺'是替换已有条目，仍按下面的 confirm/modify 处理；"
+    "'灵隐寺怎么样'是介绍，按 explain 处理；'删除灵隐寺'是删除，不是新增。"
+    "没有现有计划时，'我想去灵隐寺'属于旅行信息收集，输出 collect 并写入 requested_pois，不能输出 add。\n"
+    "3) 如果 has_plan=true 且用户是在修改已有方案，先归纳修改意图，输出："
     '{"action":"confirm","summary":"我理解你是想……","mode":"global|block","targets":[...],"instruction":"用户原意"}。'
     "具体景点/酒店/活动→block；整体意见→global。"
     "明确说删除、删了、去掉或不去某条行程，表示移除该条目并保留空档，不得改成替换、另找或补入其他景点；instruction 保留用户的删除原意。"
     "当用户在后续对话中明确确认（例如「对」「可以」「确认」）时，输出："
     '{"action":"modify","mode":"...","targets":[...],"instruction":"..."}。'
     "当用户否认或补充（例如「不对，应该是……」）时，继续输出 action=confirm 更新归纳。"
-    "3) 如果用户只是询问某个地点/景点的介绍（例如「宽窄巷子是玩啥的」「这个景点怎么样」），"
+    "4) 如果用户只是询问某个地点/景点的介绍（例如「宽窄巷子是玩啥的」「这个景点怎么样」），"
     '输出 {"action":"explain","answer":"简短解释","query":"宽窄巷子"}，不要规划行程。'
     "只输出 JSON，不要任何多余文字。"
 )
@@ -108,6 +117,12 @@ def _parse_intent_response(content: str) -> dict:
             raise ValueError("explain必须提供非空answer文本")
         if "query" in result and not isinstance(result["query"], str):
             raise ValueError("query如提供必须是文本")
+    elif action == "add":
+        if not isinstance(result.get("query"), str) or not result["query"].strip():
+            raise ValueError("add必须提供非空query文本，为用户点名要加入的具体景点名称")
+        result["query"] = result["query"].strip()
+        if "day" in result and (type(result["day"]) is not int or result["day"] < 1):
+            raise ValueError("day如提供必须为用户明确指定的正整数天数")
     elif action in ("confirm", "modify"):
         if not isinstance(result.get("instruction"), str) or not result["instruction"].strip():
             raise ValueError("confirm/modify必须提供非空instruction文本")
@@ -118,7 +133,7 @@ def _parse_intent_response(content: str) -> dict:
         if "summary" in result and not isinstance(result["summary"], str):
             raise ValueError("summary如提供必须是文本")
     else:
-        raise ValueError("action只能为collect、plan、ask、explain、confirm或modify")
+        raise ValueError("action只能为collect、plan、ask、explain、add、confirm或modify")
     return result
 
 
@@ -149,8 +164,8 @@ def resolve_intent(data: dict, client: OpenAI | None = None) -> dict:
         except (AttributeError, TypeError):
             pass
 
-    model = os.getenv("OPENAI_MODEL", "qwen3.8-27b")
-    model_options = {"extra_body": {"enable_thinking": False}} if model.lower().startswith("qwen") else {}
+    model = os.getenv("OPENAI_MODEL", "deepseek-v4.1-flash")
+    model_options = {"extra_body": {"enable_thinking": False}} if model.lower().startswith(("qwen", "deepseek")) else {}
     request_messages = [
         {"role": "system", "content": f"今天是 {today.isoformat()}。\n{SYSTEM_PROMPT}"},
         {"role": "user", "content": json.dumps(
@@ -171,6 +186,8 @@ def resolve_intent(data: dict, client: OpenAI | None = None) -> dict:
         try:
             content = resp.choices[0].message.content or ""
             result = _parse_intent_response(content)
+            if result.get("action") == "add" and not has_plan:
+                raise ValueError("没有现有计划时不能输出add，请用collect提取requested_pois")
             break
         except (ValueError, TypeError, AttributeError, IndexError) as exc:
             if attempt:
@@ -181,10 +198,12 @@ def resolve_intent(data: dict, client: OpenAI | None = None) -> dict:
                 {"role": "user", "content":
                  "请纠正上一条响应的结构错误：" + str(exc) + "。"
                  "仅返回一个JSON对象，不要数组、Markdown或说明文字。"
-                 "action仅允许collect/plan/ask/explain/confirm/modify。"
+                 "action仅允许collect/plan/ask/explain/add/confirm/modify。"
                  "旅行信息提取用collect，data必须为对象，只含原始用户消息明确表达的本轮参数；"
                  "不要补造日期、预算、人数、目的地，也不要把纠正格式视为新旅行。"
                  "解释用explain并提供answer；修改用confirm/modify并提供instruction，mode只可global/block。"
+                 "已有计划中新增具体景点用add并提供query景点名称；day只填写用户明确指定的正整数第几天。"
+                 "替换、删除、询问介绍不属于新增；没有现有计划时用collect提取requested_pois。"
                  "依据上面的原始对话和trip_data重新输出，保留已经填写的信息。"},
             ])
     if result is None:
@@ -193,7 +212,7 @@ def resolve_intent(data: dict, client: OpenAI | None = None) -> dict:
         extracted = result.get("data")
         previous = {} if result.get("new_trip") is True else trip_data
         return complete_trip_request(extracted, previous, today, questions=result.get("questions"))
-    if result.get("action") in ("explain", "confirm", "modify"):
+    if result.get("action") in ("explain", "add", "confirm", "modify"):
         return result
     return _intent_error("未能识别这条需求，请重新描述；已填写的信息已保留", trip_data)
 

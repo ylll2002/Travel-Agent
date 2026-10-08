@@ -132,11 +132,15 @@ def _validate_model(
                 "evidence仅返回必要的叶子路径字符串，不复制value或活动对象。"
                 "缩短detail与suggestion，不输出feedback；不能丢弃严重问题或补全截断JSON。" + retry_hint})
         try:
+            model = os.getenv("OPENAI_MODEL", "deepseek-v4.1-flash")
             resp = client.chat.completions.create(
-                model=os.getenv("OPENAI_MODEL", "qwen3.8-27b"),
+                model=model,
                 messages=list(messages),
                 response_format={"type": "json_object"},
-                **({"extra_body": {"enable_thinking": False}} if os.getenv("OPENAI_MODEL", "qwen3.8-27b").lower().startswith("qwen") else {}),
+                # 推理型模型（qwen / deepseek）关闭思考可减少 reasoning 占用。
+                # 原先只判断 qwen，deepseek-flash 从未生效。
+                **({"extra_body": {"enable_thinking": False}}
+                   if model.lower().startswith(("qwen", "deepseek")) else {}),
                 max_tokens=token_limit,
                 timeout=45,
             )
@@ -151,6 +155,13 @@ def _validate_model(
             content = (choice.message.content or "{}").strip()
         except (AttributeError, IndexError, TypeError):
             last_error = "模型审核回复结构无效"
+            continue
+        if not content.strip() or content.strip() == "{}":
+            # 推理模型可能把 max_tokens 预算全用在 reasoning 上，此时
+            # finish_reason 未必是 "length"，但 content 为空。必须同样扩容，
+            # 否则两次尝试都会失败并降级为"审核未返回有效结论"。
+            last_error = "模型审核回复为空"
+            token_limit = 8192
             continue
         if content.startswith("```"):
             content = content.strip("`")

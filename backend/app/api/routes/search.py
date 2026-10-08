@@ -3,20 +3,29 @@ import os
 import subprocess
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+import sys
 
 ROOT = Path(__file__).resolve().parents[4]
+
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from agent_env import component_python, subprocess_env
 SEARCH_PY = ROOT / "SearchAgent" / "search.py"
-SEARCH_PYTHON = ROOT / "SearchAgent" / ".venv" / "bin" / "python"
+SEARCH_PYTHON = component_python("SearchAgent")
 
 router = APIRouter(prefix="/search", tags=["search"])
 
 
 def _subprocess_env() -> dict:
-    env = dict(os.environ)
-    env.pop("__PYVENV_LAUNCHER__", None)
-    return env
+    """子进程环境：UTF-8 标准流 + 清理 macOS venv 遗留变量。
+
+    必须与父进程的 encoding="utf-8" 配套，否则子进程会按 GBK 输出中文，
+    父进程按 UTF-8 解码即抛 UnicodeDecodeError。
+    """
+    return subprocess_env()
 
 
 class SearchRequest(BaseModel):
@@ -25,6 +34,48 @@ class SearchRequest(BaseModel):
     start_date: str | None = None
     end_date: str | None = None
     origin: str | None = None
+
+
+class PoiKeywordRequest(BaseModel):
+    destination: str
+    keyword: str
+
+
+@router.post("/poi")
+def search_poi_keyword(payload: PoiKeywordRequest) -> dict:
+    """Find a named attraction in a city for adding it to an existing plan."""
+    destination = payload.destination.strip()
+    keyword = payload.keyword.strip()
+    if not destination or not keyword:
+        raise HTTPException(status_code=400, detail="请填写目的地和景点名称")
+
+    try:
+        proc = subprocess.run(
+            [str(SEARCH_PYTHON), str(SEARCH_PY), "--poi-keyword", keyword, "--city", destination],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=_subprocess_env(),
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise HTTPException(status_code=504, detail="景点搜索超时，请稍后重试") from exc
+    except OSError as exc:
+        raise HTTPException(status_code=502, detail="景点搜索暂时不可用，请稍后重试") from exc
+
+    if proc.returncode != 0:
+        raise HTTPException(status_code=502, detail="景点搜索暂时不可用，请稍后重试")
+    try:
+        result = json.loads(proc.stdout)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise HTTPException(status_code=502, detail="景点搜索返回格式异常，请稍后重试") from exc
+    if not isinstance(result, dict) or "error" in result or not isinstance(result.get("poi"), list):
+        raise HTTPException(status_code=502, detail="景点搜索暂时不可用，请稍后重试")
+    pois = result["poi"]
+    if any(not isinstance(item, dict) for item in pois):
+        raise HTTPException(status_code=502, detail="景点搜索返回格式异常，请稍后重试")
+    return {"poi": [item for item in pois if str(item.get("name") or "").strip()]}
 
 
 @router.post("")
@@ -41,6 +92,8 @@ def search(payload: SearchRequest) -> dict:
                 input=payload.query,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 env=_subprocess_env(),
                 timeout=120,
             )
@@ -69,6 +122,8 @@ def search(payload: SearchRequest) -> dict:
             input=json.dumps(search_payload, ensure_ascii=False),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=_subprocess_env(),
             timeout=180,
         )

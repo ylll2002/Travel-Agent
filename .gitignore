@@ -12,6 +12,7 @@ venv/
 .python-version
 SearchAgent/cache/
 PlanAgent/route_cache.json
+PlanAgent/poi_embedding_cache.json
 *.db
 *.sqlite3
 .env

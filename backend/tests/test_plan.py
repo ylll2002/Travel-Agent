@@ -15,6 +15,7 @@ from app.api.routes.plan import (
     _run_json,
     create_plan,
     plan_stream,
+    city_guide_stream,
 )
 
 
@@ -187,6 +188,41 @@ class PlanMutationTests(unittest.TestCase):
 
 
 class StreamCancellationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_city_guide_stream_uses_search_agent_and_only_destination(self):
+        proc = SimpleNamespace(pid=43210, returncode=0, stdin=MagicMock(), stdout=MagicMock(),
+                               stderr=MagicMock(), wait=AsyncMock(return_value=0))
+        proc.stdin.drain = AsyncMock()
+        proc.stdout.readline = AsyncMock(side_effect=[
+            b'{"type":"guide","text":"city introduction"}\n',
+            b'{"type":"final","data":{}}\n', b''])
+        proc.stderr.read = AsyncMock(return_value=b'')
+        response = city_guide_stream(PlanRequest(destination="杭州", basic={"budget": 1000}))
+        with patch("app.api.routes.plan.asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)) as launch:
+            events = [event async for event in response.body_iterator]
+        self.assertTrue(str(launch.call_args.args[1]).endswith('SearchAgent/search.py'))
+        self.assertEqual(launch.call_args.args[2], '--guide-stream')
+        self.assertEqual(json.loads(proc.stdin.write.call_args.args[0]), {"destination": "杭州"})
+        self.assertIn('city introduction', events[0])
+        self.assertIn('"final"', events[1])
+        self.assertEqual(events[-1], 'data: [DONE]\n\n')
+
+    async def test_city_guide_rejects_empty_destination(self):
+        with self.assertRaises(HTTPException) as error:
+            city_guide_stream(PlanRequest(destination='  '))
+        self.assertEqual(error.exception.status_code, 422)
+
+    async def test_closing_city_guide_cleans_up_search_process(self):
+        proc = SimpleNamespace(pid=43210, returncode=None, stdin=MagicMock(), stdout=MagicMock(),
+                               stderr=MagicMock(), wait=AsyncMock(return_value=0))
+        proc.stdin.drain = AsyncMock()
+        proc.stdout.readline = AsyncMock(return_value=b'{"type":"guide","text":"intro"}\n')
+        proc.stderr.read = AsyncMock(return_value=b'')
+        response = city_guide_stream(PlanRequest(destination="杭州"))
+        with patch("app.api.routes.plan.asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)), patch("app.api.routes.plan.os.killpg") as killpg:
+            await response.body_iterator.__anext__()
+            await response.body_iterator.aclose()
+        killpg.assert_called_once_with(proc.pid, signal.SIGTERM)
+
     async def test_closing_stream_terminates_entire_process_group(self):
         proc = SimpleNamespace(pid=43210, returncode=None, stdin=MagicMock(), stdout=MagicMock(), stderr=MagicMock(), wait=AsyncMock(return_value=0), terminate=MagicMock(), kill=MagicMock())
         proc.stdin.drain = AsyncMock()

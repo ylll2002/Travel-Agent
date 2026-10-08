@@ -10,7 +10,7 @@ export function PlanReviewPanel({ plan, busy, onLocate, onRetry, onRepair, progr
   if (progress?.stage === 'planning') heading = {status:'pending',title:'正在生成方案',description:'方案生成后将自动审核和修复。'};
   if (progress?.stage === 'reviewing') heading = {status:'pending',title:'正在审核',description:'正在检查当前版本的费用、时间、来源和旅行需求。'};
   if (progress?.stage === 'repairing') heading = {status:'blocked',title:'正在自动修复',description:`已将严重问题交给规划助手，正在进行第 ${progress.repairCount + 1}/${progress.repairLimit} 次修复。`};
-  if (progress?.stage === 'cancelled') heading = {status:'pending',title:'处理已停止',description:'已保留最近生成的行程；未完成的审核不能用于确认。'};
+  if (progress?.stage === 'cancelled') heading = {status:'pending',title:'处理已停止',description:'已保留最近生成的行程，你仍可自行确认计划。'};
   if (progress?.stopReason === 'limit' && !plan.audit?.passed) heading.description = `已完成 ${progress.repairCount} 次自动修复，仍有以下问题。行程已保留，可以再次尝试自动修复。`;
   const audit = currentPlanAudit(plan);
   if (progress?.stage === 'error' && !audit) heading = {status:'error',title:'处理未完成',description:'已保留现有行程，请重试。具体原因见处理过程。'};

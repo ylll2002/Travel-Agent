@@ -132,7 +132,7 @@ def _validate_model(
                 "evidence仅返回必要的叶子路径字符串，不复制value或活动对象。"
                 "缩短detail与suggestion，不输出feedback；不能丢弃严重问题或补全截断JSON。" + retry_hint})
         try:
-            model = os.getenv("OPENAI_MODEL", "deepseek-flash")
+            model = os.getenv("OPENAI_MODEL", "deepseek-v4-flash-0731")
             resp = client.chat.completions.create(
                 model=model,
                 messages=list(messages),

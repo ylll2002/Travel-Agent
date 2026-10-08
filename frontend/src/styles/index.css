@@ -5899,13 +5899,14 @@ button:disabled {
   background: #fffbf2;
 }
 .ta-review-confirm-hint { margin: 6px 0 0; font-size: 12px; color: #8a4024; }
-.ta-city-guide { margin: 16px 0; padding: 20px; border: 1px solid #e4edf4; border-radius: 18px; background: #f5f9fc; color: #20364b; }
-.ta-city-guide > strong { display: block; font-size: 16px; }
-.ta-generation-track { height: 6px; overflow: hidden; margin: 12px 0 8px; border-radius: 9px; background: #e3edf5; }
+.ta-chat-status { flex: 0 0 auto; min-width: 0; margin-bottom: 10px; }
+.ta-city-guide { margin: 0; padding: 12px 14px; border: 1px solid #e4edf4; border-radius: 14px; background: #f5f9fc; color: #20364b; }
+.ta-city-guide > strong { display: block; font-size: 14px; line-height: 1.4; }
+.ta-generation-track { height: 6px; overflow: hidden; margin: 8px 0 6px; border-radius: 9px; background: #e3edf5; }
 .ta-generation-track > span { display: block; height: 100%; border-radius: inherit; background: #2585da; transition: width .5s ease; }
-.ta-city-guide small { color: #60788e; font-size: 11px; }
-.ta-city-guide h3 { margin: 20px 0 12px; font-size: 18px; }
-.ta-city-guide-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.85; font-size: 14px; }
+.ta-city-guide small { display: block; color: #60788e; font-size: 11px; line-height: 1.5; }
+.ta-city-guide h3 { margin: 10px 0 6px; font-size: 14px; line-height: 1.4; }
+.ta-city-guide-text { max-height: clamp(48px, 12vh, 96px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; font-size: 12px; }
 
 
 .ta-plan-column > .ta-plan-detail { flex: 1 1 0; height: auto; }

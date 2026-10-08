@@ -149,8 +149,8 @@ def resolve_intent(data: dict, client: OpenAI | None = None) -> dict:
         except (AttributeError, TypeError):
             pass
 
-    model = os.getenv("OPENAI_MODEL", "qwen3.8-27b")
-    model_options = {"extra_body": {"enable_thinking": False}} if model.lower().startswith("qwen") else {}
+    model = os.getenv("OPENAI_MODEL", "deepseek-v4-flash-0731")
+    model_options = {"extra_body": {"enable_thinking": False}} if model.lower().startswith(("qwen", "deepseek")) else {}
     request_messages = [
         {"role": "system", "content": f"今天是 {today.isoformat()}。\n{SYSTEM_PROMPT}"},
         {"role": "user", "content": json.dumps(

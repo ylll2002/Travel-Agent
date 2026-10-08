@@ -1460,6 +1460,13 @@ export function AgentPage() {
             </div>
           </div>
 
+          {generation && (
+            <div className="ta-chat-status">
+              <CityGuide key={generation.id} destination={generation.destination}
+                progress={generation.progress} status={generation.status} />
+            </div>
+          )}
+
           <div className="ta-chat-messages">
             {messages.map((message) => {
               const confirmFields = message.tripConfirmData
@@ -1565,8 +1572,6 @@ export function AgentPage() {
                 </div>
               ) : null;
             })()}
-            {generation && <CityGuide key={generation.id} destination={generation.destination}
-              progress={generation.progress} status={generation.status} />}
           </div>
 
           {question && (

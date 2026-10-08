@@ -60,7 +60,7 @@ SEARCH_PYTHON = component_python("SearchAgent")
 
 def _model_options() -> dict:
     # 规划、补全、编辑无需长思考，避免 Qwen 默认思考模式拖慢交互。
-    model = os.getenv("OPENAI_MODEL", "qwen3.8-27b").lower()
+    model = os.getenv("OPENAI_MODEL", "deepseek-v4-flash-0731").lower()
     if "qwen" in model or "deepseek" in model:
         return {"extra_body": {"enable_thinking": False}}
     return {}
@@ -1545,7 +1545,7 @@ def _build_day_plan(
     for _ in range(2):
         try:
             resp = _chat_completion(client,
-                model=os.getenv("OPENAI_MODEL", "qwen3.8-27b"),
+                model=os.getenv("OPENAI_MODEL", "deepseek-v4-flash-0731"),
                 messages=[
                     {"role": "system", "content": DAY_PLAN_PROMPT},
                     {"role": "user", "content": json.dumps(ctx, ensure_ascii=False)},
@@ -2893,7 +2893,7 @@ def modify_blocks(
         context["basic"] = basic
 
     resp = _chat_completion(client,
-        model=os.getenv("OPENAI_MODEL", "qwen3.8-27b"),
+        model=os.getenv("OPENAI_MODEL", "deepseek-v4-flash-0731"),
         messages=[
             {"role": "system", "content": MODIFY_PROMPT},
             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
@@ -2974,7 +2974,7 @@ def classify_modify(client: OpenAI, instruction: str, blocks: list[dict]) -> dic
         for b in blocks
     ]
     resp = _chat_completion(client,
-        model=os.getenv("OPENAI_MODEL", "qwen3.8-27b"),
+        model=os.getenv("OPENAI_MODEL", "deepseek-v4-flash-0731"),
         messages=[
             {"role": "system", "content": CLASSIFY_MODIFY_PROMPT},
             {
@@ -3051,7 +3051,7 @@ def _modify_block_local(
         context["basic"] = basic
 
     resp = _chat_completion(client,
-        model=os.getenv("OPENAI_MODEL", "qwen3.8-27b"),
+        model=os.getenv("OPENAI_MODEL", "deepseek-v4-flash-0731"),
         messages=[
             {"role": "system", "content": BLOCK_MODIFY_PROMPT},
             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
@@ -3357,7 +3357,7 @@ def _modified_plan_reply(client, messages: list[dict], *, repairing=False, expec
     reason = "规划模型没有返回完整日程"
     for attempt in range(2 if repairing else 1):
         try:
-            resp = _chat_completion(client, model=os.getenv("OPENAI_MODEL", "qwen3.8-27b"),
+            resp = _chat_completion(client, model=os.getenv("OPENAI_MODEL", "deepseek-v4-flash-0731"),
                                     messages=request_messages, response_format={"type": "json_object"},
                                     max_tokens=16000, timeout=120 if repairing else 300)
         except json.JSONDecodeError:

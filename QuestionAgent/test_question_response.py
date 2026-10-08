@@ -135,10 +135,19 @@ class QuestionResponseTests(unittest.TestCase):
 
     def test_real_client_constructor_disables_sdk_retries(self):
         client = self.client([VALID])
-        with patch("agent.OpenAI", return_value=client) as constructor:
+        with patch.dict("agent.os.environ", {"OPENAI_API_KEY": "local-test-only"}), patch("agent.OpenAI", return_value=client) as constructor:
             result = resolve_intent(self.payload)
         self.assertEqual(constructor.call_args.kwargs["max_retries"], 0)
         self.assertEqual(result["action"], "confirm_trip")
+
+    def test_missing_api_key_requests_configuration_and_preserves_trip(self):
+        for key in (None, "", "   ", "sk-your-key-here", "sk-your-qwen-key-here"):
+            with self.subTest(key=key), patch.dict("agent.os.environ", {} if key is None else {"OPENAI_API_KEY": key}, clear=True), patch("agent.OpenAI") as constructor:
+                result = resolve_intent(self.payload)
+            self.assertIn("未配置模型 API Key", result["error"])
+            self.assertIn("请先", result["error"])
+            self.assertEqual(result["data"], PREVIOUS)
+            constructor.assert_not_called()
 
     def test_empty_user_input_keeps_state_and_does_not_call_model(self):
         client = self.client([])

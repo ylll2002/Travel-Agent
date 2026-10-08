@@ -47,6 +47,7 @@ sys.path.insert(0, str(ROOT))
 from shared.sources import merge_plan_sources
 from shared.audit import without_review
 from shared.route_timing import LOCAL_TRANSFER_PADDING_S, MODE_LABELS
+from shared.model_config import MISSING_MODEL_API_KEY, model_api_key_configured
 
 SEARCH_PY = ROOT / "SearchAgent" / "search.py"
 SEARCH_PYTHON = ROOT / "SearchAgent" / ".venv" / "bin" / "python"
@@ -3853,6 +3854,9 @@ def main() -> None:
 
     try:
         data = json.loads(raw)
+        if not model_api_key_configured() and not (isinstance(data, dict) and data.get("finalize")):
+            print(json.dumps({"error": MISSING_MODEL_API_KEY}, ensure_ascii=False))
+            return
         if isinstance(data, dict) and data.get("audit_repair"):
             result = repair_plan(data.get("plan") or {}, data.get("repair_issues") or [],
                                  data.get("search"), data.get("profile"), data.get("basic"))

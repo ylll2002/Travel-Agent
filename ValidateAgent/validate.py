@@ -11,6 +11,7 @@ from openai import OpenAI
 BASE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE_DIR.parent))
 from shared.audit import combine_audits, failed_audit, normalize_audit
+from shared.model_config import MISSING_MODEL_API_KEY, model_api_key_configured
 from ValidateAgent.rules import validate_rules
 from ValidateAgent.context import plan_for_model, search_for_model
 from ValidateAgent.evidence import EvidencePathError, evidence_path_examples, materialize_model_evidence, verify_model_issues
@@ -87,6 +88,8 @@ def _validate_model(
     *,
     rule_audit: dict | None = None,
 ) -> dict:
+    if not model_api_key_configured():
+        return _failed_audit(MISSING_MODEL_API_KEY, MISSING_MODEL_API_KEY, plan)
     kwargs: dict = {"api_key": os.getenv("OPENAI_API_KEY")}
     if os.getenv("OPENAI_BASE_URL"):
         kwargs["base_url"] = os.getenv("OPENAI_BASE_URL")

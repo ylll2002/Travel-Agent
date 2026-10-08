@@ -22,6 +22,9 @@ from openai import OpenAI
 from trip_intent import complete_trip_request, local_today
 
 BASE_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(BASE_DIR.parent))
+from shared.model_config import MISSING_MODEL_API_KEY, model_api_key_configured
+
 load_dotenv(BASE_DIR / ".env")
 # 共用规划模型配置；当前项目没有单独的 QuestionAgent/.env。
 load_dotenv(BASE_DIR.parent / "PlanAgent" / ".env")
@@ -66,6 +69,7 @@ SYSTEM_PROMPT = (
     "2) 如果 has_plan=true 且用户是在修改已有方案，先归纳修改意图，输出："
     '{"action":"confirm","summary":"我理解你是想……","mode":"global|block","targets":[...],"instruction":"用户原意"}。'
     "具体景点/酒店/活动→block；整体意见→global。"
+    "明确说删除、删了、去掉或不去某条行程，表示移除该条目并保留空档，不得改成替换、另找或补入其他景点；instruction 保留用户的删除原意。"
     "当用户在后续对话中明确确认（例如「对」「可以」「确认」）时，输出："
     '{"action":"modify","mode":"...","targets":[...],"instruction":"..."}。'
     "当用户否认或补充（例如「不对，应该是……」）时，继续输出 action=confirm 更新归纳。"
@@ -129,6 +133,8 @@ def resolve_intent(data: dict, client: OpenAI | None = None) -> dict:
         return _intent_error("请输入旅行需求", trip_data)
 
     if client is None:
+        if not model_api_key_configured():
+            return _intent_error(MISSING_MODEL_API_KEY + "已填写的信息已保留。", trip_data)
         kwargs: dict = {"api_key": os.getenv("OPENAI_API_KEY"), "max_retries": 0}
         if os.getenv("OPENAI_BASE_URL"):
             kwargs["base_url"] = os.getenv("OPENAI_BASE_URL")

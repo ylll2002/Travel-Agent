@@ -39,7 +39,13 @@ export function currentAudit(value: unknown, revision: unknown): PlanAudit | nul
   return audit as PlanAudit;
 }
 
+export function missingApiKeyMessage(error: unknown): string | undefined {
+  return typeof error === 'string' && error.includes('未配置模型 API Key') ? error : undefined;
+}
+
 export function reviewMessage(audit: PlanAudit | null): string {
+  const configurationMessage = missingApiKeyMessage(audit?.error);
+  if (configurationMessage) return configurationMessage;
   if (!audit || audit.status === 'error') return '审核暂未完成，当前版本需要重新审核。';
   // Details and evidence live in the plan panel; chat only reports the outcome.
   if (!audit.passed) return '当前行程需要调整，请查看审核窗口的审核结果。';
@@ -61,10 +67,7 @@ export type ReviewPlan = {
 export function confirmationReason(plan: ReviewPlan | null, busy = false, selected = 0): string {
   if (busy || plan?.review_pending) return '正在处理行程，请稍候。';
   if (selected > 0) return '请先完成或取消选中的修改。';
-  const audit = currentPlanAudit(plan);
-  if (!audit) return '当前行程尚未审核，请先完成审核。';
-  if (audit.status === 'error') return '审核未完成，请重试审核。';
-  if (!audit.passed) return '请先处理全部方案中需要修改的问题。';
+  if (!plan || plan.blocks.length === 0) return '请先生成行程。';
   return '';
 }
 
@@ -83,11 +86,11 @@ export function issueTarget(issue: AuditIssue, blocks: ReviewPlan['blocks']) {
 export function reviewHeading(plan: ReviewPlan): { status: string; title: string; description: string } {
   if (plan.review_pending) return { status: 'pending', title: '正在审核', description: '处理完成后显示当前行程的审核结果。' };
   const audit = currentPlanAudit(plan);
-  if (!audit) return { status: 'pending', title: '尚未审核', description: '当前行程没有有效的审核结果。示例数据也需要审核后才能确认。' };
+  if (!audit) return { status: 'pending', title: '尚未审核', description: '当前行程没有有效的审核结果，你仍可自行确认计划。' };
   const descriptions = {
     passed: ['审核通过', '在现有数据范围内未发现问题。'],
     warning: ['审核通过，有建议', '未发现阻断问题，请在预订前核实以下建议。'],
-    blocked: ['需要修改', '发现严重问题，请定位并调整行程后再确认。'],
+    blocked: ['需要修改', '发现严重问题，建议查看并调整；你也可以直接确认计划。'],
     error: ['审核未完成', '现有行程已保留，请重试审核。已完成的规则检查仍显示在下方。'],
   };
   const [title, description] = descriptions[audit.status];
@@ -103,8 +106,8 @@ export type ReviewProgress = {
   entries: Array<{ stage: string; revision?: number; reasons: string[] }>;
 };
 
-export function canAutoRepair(audit: PlanAudit | null): boolean {
-  return !!audit && audit.status === 'blocked' && !audit.error && !audit.passed
+export function canAutoRepair(audit: PlanAudit | null, action?: unknown): boolean {
+  return action !== 'delete' && !!audit && audit.status === 'blocked' && !audit.error && !audit.passed
     && audit.issues.some(issue => issue.severity === 'high' && issue.actionable);
 }
 

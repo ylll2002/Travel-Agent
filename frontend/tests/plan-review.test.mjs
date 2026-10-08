@@ -6,9 +6,19 @@ import ts from 'typescript';
 // Run the actual TS module with the existing compiler; no test-framework dependency.
 const source = await readFile(new URL('../src/lib/planReview.ts', import.meta.url), 'utf8');
 const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
-const { confirmationReason, issueTarget, reviewHeading, currentAudit, currentPlanAudit, reviewMessage, canAutoRepair, advanceReviewProgress } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+const { confirmationReason, issueTarget, reviewHeading, currentAudit, currentPlanAudit, reviewMessage, canAutoRepair, advanceReviewProgress, missingApiKeyMessage } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
 const passed = { schema_version: 1, plan_revision: 4, status: 'passed', passed: true, issues: [] };
 const issue = { severity: 'high', detail: '赶不上列车' };
+
+test('missing API key is visible in chat while other failure messages remain unchanged', () => {
+  const error = '未配置模型 API Key，请先在服务端配置 API Key 后重试。';
+  const audit = { ...passed, status: 'error', passed: false, error };
+  assert.equal(missingApiKeyMessage(error), error);
+  assert.equal(reviewMessage(audit), error);
+  assert.equal(canAutoRepair(audit), false);
+  for (const value of [undefined, '服务超时', '额度不足']) assert.equal(missingApiKeyMessage(value), undefined);
+  assert.equal(reviewMessage({ ...audit, error: '服务超时' }), '审核暂未完成，当前版本需要重新审核。');
+});
 
 test('editing a new revision never reuses the preceding passing verdict', () => {
   assert.equal(currentAudit(passed, 5), null);
@@ -61,14 +71,16 @@ const blocks = [
 ];
 const reviewed = { revision: 4, audit: passed, blocks };
 
-test('confirmation permits current pass and suggestions, blocks unreviewed/error/severe/pending/selection', () => {
+test('confirmation permits all audit outcomes, blocks missing plans/pending/selection', () => {
   assert.equal(confirmationReason(reviewed), '');
   assert.equal(confirmationReason({ ...reviewed, audit: { ...passed, status: 'warning', issues: [{severity: 'medium', detail: '报价待核实'}] } }), '');
-  for (const plan of [null, { ...reviewed, revision: 5 }, { ...reviewed, audit: null },
+  for (const plan of [{ ...reviewed, revision: 5 }, { ...reviewed, audit: null },
     { ...reviewed, audit: { ...passed, status: 'error', passed: false } },
     { ...reviewed, audit: { ...passed, status: 'blocked', passed: false, issues: [issue] } },
-    { ...reviewed, review_pending: true },
-  ]) assert.notEqual(confirmationReason(plan), '');
+  ]) assert.equal(confirmationReason(plan), '');
+  assert.notEqual(confirmationReason(null), '');
+  assert.notEqual(confirmationReason({...reviewed, blocks:[]}), '');
+  assert.notEqual(confirmationReason({...reviewed, review_pending:true}), '');
   assert.notEqual(confirmationReason(reviewed, true), '');
   assert.notEqual(confirmationReason(reviewed, false, 1), '');
 });
@@ -129,7 +141,7 @@ test('unknown-price suggestion permits confirmation; model failure is a separate
     issues:[{severity:'medium',type:'预算',source:'rule',detail:'报价未知，预订前核实',suggestion:'核实报价',block_ids:[],actionable:false}]};
   assert.equal(confirmationReason({...reviewed, audit}), '');
   assert.match(render({...reviewed, audit}), /未知报价仅作核实提示/);
-  assert.notEqual(confirmationReason({...reviewed, audit:{...audit,status:'error',passed:false,error:'模型审核未返回有效JSON'}}), '');
+  assert.equal(confirmationReason({...reviewed, audit:{...audit,status:'error',passed:false,error:'模型审核未返回有效JSON'}}), '');
 });
 
 
@@ -154,6 +166,15 @@ test('only verified actionable high failures start automatic repair', () => {
   }
 });
 
+test('deleting a plan item keeps the gap instead of automatically repairing it', () => {
+  const bad = {...passed,status:'blocked',passed:false,issues:[{...issue,actionable:true}]};
+  assert.equal(canAutoRepair(bad, 'delete'), false);
+  assert.equal(canAutoRepair(bad, 'modify'), true);
+  assert.equal(canAutoRepair(bad, 'add'), true);
+  assert.equal(canAutoRepair(bad, 'update'), true);
+  assert.equal(canAutoRepair({...bad,status:'error',error:'未配置模型 API Key，请先配置。'}, 'modify'), false);
+});
+
 test('live review keeps failed reasons during repair and hides old verdict on the next snapshot', () => {
   const bad = {...passed,status:'blocked',passed:false,issues:[{...issue,actionable:true,block_ids:['v1'],suggestion:'提前结束活动'}]};
   let progress=advanceReviewProgress(null,{stage:'reviewing',plan:{revision:4}});
@@ -170,11 +191,11 @@ test('live review keeps failed reasons during repair and hides old verdict on th
   assert.notEqual(confirmationReason({...reviewed,revision:5,audit:null,review_pending:true},true),'');
 });
 
-test('reaching the automatic repair limit never unlocks confirmation', () => {
+test('reaching the automatic repair limit permits user confirmation', () => {
   const bad={...passed,status:'blocked',passed:false,issues:[issue]};
   const progress=advanceReviewProgress(null,{stage:'blocked',plan:{revision:4},audit:bad,repair_count:2,stop_reason:'limit'});
   const html=renderToStaticMarkup(createElement(PlanReviewPanel,{plan:{...reviewed,audit:bad},busy:false,progress,onLocate(){},onRetry(){},onRepair(){}}));
   assert.match(html,/已完成 2 次自动修复/);
   assert.match(html,/再次自动修复/);
-  assert.notEqual(confirmationReason({...reviewed,audit:bad}),'');
+  assert.equal(confirmationReason({...reviewed,audit:bad}),'');
 });

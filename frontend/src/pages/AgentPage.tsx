@@ -6,7 +6,8 @@ import type { RouteBlock, RouteLeg } from '../components/TripMap';
 import { TripQuestions } from '../components/TripQuestions';
 import type { TripQuestion } from '../components/TripQuestions';
 import { usePlanStream } from '../hooks/usePlanStream';
-import { advanceReviewProgress, canAutoRepair, confirmationReason, currentAudit, issueTarget, reviewMessage } from '../lib/planReview';
+import { advanceReviewProgress, canAutoRepair, confirmationReason, currentAudit, issueTarget, missingApiKeyMessage, reviewMessage } from '../lib/planReview';
+import CityGuide from '../components/CityGuide';
 import { PlanReviewWindow } from '../components/PlanReviewWindow';
 import type { AuditIssue, PlanAudit, ReviewContext, ReviewProgress } from '../lib/planReview';
 
@@ -488,6 +489,16 @@ export function AgentPage() {
   const committedSearchRef = useRef<Record<string, unknown>>({});
   const requestControllerRef = useRef<(AbortController & { mutation?: boolean }) | null>(null);
   const [planning, setPlanning] = useState(false);
+  const [generation, setGeneration] = useState<{id:number; destination:string; progress:number; status:'running'|'complete'|'stopped'} | null>(null);
+  useEffect(() => {
+    if (!planning) setGeneration(previous => previous?.status === 'running' ? {...previous, status:'stopped'} : previous);
+  }, [planning]);
+  useEffect(() => {
+    if (!planning) return;
+    const timer = window.setInterval(() => setGeneration(previous => previous?.status === 'running'
+      ? {...previous, progress:Math.max(previous.progress, Math.min(94, previous.progress + 1))} : previous), 5000);
+    return () => window.clearInterval(timer);
+  }, [planning]);
   const [reviewProgress, setReviewProgress] = useState<ReviewProgress | null>(null);
   const [mapPosition, setMapPosition] = useState(() => {
     if (typeof window === 'undefined') return { x: 760, y: 520 };
@@ -750,6 +761,7 @@ export function AgentPage() {
 
   async function runPlan(payload: Record<string, unknown>) {
     const version = ++planRequestVersionRef.current;
+    setGeneration({id:version, destination:String(payload.destination ?? ''), progress:5, status:'running'});
     setPlanning(true);
     setReviewProgress(advanceReviewProgress(null, {stage:'planning',repair_count:0}));
     setRoutePlan(previous => previous ? {...previous,audit:null,review_pending:true} : previous);
@@ -757,21 +769,28 @@ export function AgentPage() {
     setSelectedBlocks(new Set());
     await startPlanStream(payload, event => {
       if (version !== planRequestVersionRef.current) return;
-      if (event.type === 'node') { receiveWorkflowEvent(event.data); return; }
+      if (event.type === 'node') {
+        const data = event.data;
+        const target = data.node === 'search' ? 35 : data.stage === 'reviewing' ? 65 + Number(data.repair_count ?? 0) * 10
+          : data.stage === 'repairing' ? 70 + Number(data.repair_count ?? 0) * 10 : 5;
+        setGeneration(previous => previous ? {...previous, progress:Math.max(previous.progress, Math.min(95, target))} : previous);
+        receiveWorkflowEvent(data); return;
+      }
       if (event.type === 'error') {
         workflowFailed(event.error);
-        updateLastAssistantMessage('本次处理未完成，现有行程已保留，请查看审核窗口。');
+        updateLastAssistantMessage(missingApiKeyMessage(event.error) ?? '本次处理未完成，现有行程已保留，请查看审核窗口。');
         return;
       }
       const raw = event.data;
       const plan = (raw.plan ?? {}) as Record<string,unknown>;
       if (typeof raw.error === 'string' || typeof plan.error === 'string') {
         workflowFailed(String(raw.error ?? plan.error));
-        updateLastAssistantMessage('本次处理未完成，请查看审核窗口后重试。');
+        updateLastAssistantMessage(missingApiKeyMessage(raw.error ?? plan.error) ?? '本次处理未完成，请查看审核窗口后重试。');
         return;
       }
       const snapshot = publishPlanSnapshot(raw,false);
       if (!snapshot || !snapshot.audit) {workflowFailed('未收到完整行程和有效审核结论，请重试。'); return;}
+      setGeneration(previous => previous ? {...previous, progress:100, status:'complete'} : previous);
       const workflow = raw.workflow as Record<string,unknown> | undefined;
       setReviewProgress(previous => advanceReviewProgress(previous, {stage:snapshot.audit?.status ?? 'error',plan:snapshot,
         audit:snapshot.audit,...workflow,repair_count:workflow?.repair_count}));
@@ -834,6 +853,9 @@ export function AgentPage() {
         throw new Error(raw.error);
       }
       if (!Array.isArray(raw.blocks)) throw new Error('没有收到更新后的计划，请重试。');
+      const mutation = raw.mutation && typeof raw.mutation === 'object'
+        ? raw.mutation as Record<string, unknown> : undefined;
+      const editAction = mutation?.action ?? change.action;
       let audit = currentAudit(raw.audit, raw.revision);
       const editedSnapshot = publishPlanSnapshot(raw, false);
       if (!editedSnapshot) throw new Error('没有收到完整的新行程，请重试。');
@@ -855,11 +877,16 @@ export function AgentPage() {
       setSelectedBlocks(new Set());
       setConfirmedStyle(null);
       setSaveState('idle');
-      if (canAutoRepair(audit)) {
+      if (canAutoRepair(audit, editAction)) {
         audit = await repairCurrentSnapshot(editedSnapshot, committedSearchRef.current, version);
         if (controller.signal.aborted || version !== planRequestVersionRef.current) return false;
       }
-      updateLastAssistantMessage([successMessage, reviewMessage(audit)].join('\n'));
+      const removedNames = Array.isArray(mutation?.removed_names)
+        ? mutation.removed_names.filter((name): name is string => typeof name === 'string' && !!name.trim()) : [];
+      const message = editAction === 'delete'
+        ? `已移除${removedNames.length ? removedNames.map(name => `「${name}」`).join('、') : '选中的计划条目'}，行程与路线已更新，空出的时段已保留。`
+        : successMessage;
+      updateLastAssistantMessage([message, reviewMessage(audit)].join('\n'));
       return true;
     } catch (error) {
       if ((error as Error).name === 'AbortError' || controller.signal.aborted || requestControllerRef.current !== controller || version !== planRequestVersionRef.current) return false;
@@ -1534,6 +1561,8 @@ export function AgentPage() {
                 </div>
               ) : null;
             })()}
+            {generation && <CityGuide key={generation.id} destination={generation.destination}
+              progress={generation.progress} status={generation.status} />}
           </div>
 
           {question && (
@@ -1664,6 +1693,9 @@ export function AgentPage() {
                 <div className="ta-plan-confirmed">已确认该计划</div>
               )}
               <div className="ta-plan-detail-scroll">
+                {!routePlan.blocks.some(block => block.plan_style === expandedStyle) && (
+                  <p className="ta-question-hint">该方案暂无行程条目，可以从右侧添加。</p>
+                )}
                 {routePlan.blocks
                   .filter((b) => b.plan_style === expandedStyle)
                   .reduce((acc: Array<{ day: number; blocks: RouteBlock[] }>, b) => {

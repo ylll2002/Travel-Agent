@@ -14,6 +14,11 @@ def response(content):
 
 
 class ValidateTests(unittest.TestCase):
+    def setUp(self):
+        environment = patch.dict("ValidateAgent.validate.os.environ", {"OPENAI_API_KEY": "local-test-only"})
+        environment.start()
+        self.addCleanup(environment.stop)
+
     def model(self, contents):
         stub = patch("ValidateAgent.validate.OpenAI")
         client_class = stub.start()
@@ -82,6 +87,16 @@ class ValidateTests(unittest.TestCase):
             result = validate_plan({})
         self.assertIs(result["passed"], False)
         self.assertTrue(result["error"])
+
+    def test_missing_api_key_is_explicit_and_never_reports_a_passing_review(self):
+        for key in (None, "", "   ", "sk-your-key-here"):
+            with self.subTest(key=key), patch.dict("ValidateAgent.validate.os.environ", {} if key is None else {"OPENAI_API_KEY": key}, clear=True), patch("ValidateAgent.validate.OpenAI") as constructor:
+                result = validate_plan({"revision": 7, "blocks": []})
+            self.assertIn("未配置模型 API Key", result["error"])
+            self.assertFalse(result["passed"])
+            self.assertEqual(result["status"], "error")
+            self.assertEqual(result["plan_revision"], 7)
+            constructor.assert_not_called()
 
     def test_invalid_issue_or_contradictory_verdict_is_retried(self):
         invalid = [

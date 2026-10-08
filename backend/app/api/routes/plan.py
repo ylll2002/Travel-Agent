@@ -307,7 +307,62 @@ def _select_targets(blocks: list[dict], modify: dict) -> list[dict]:
 
 
 def _is_delete_instruction(instruction: str) -> bool:
-    return not re.search(r"替换|换成|换为|改成|改为|更换", instruction) and bool(re.search(r"删除|删掉|移除|去掉|取消|不去|不要去|不要这|不要该|不要这个|不要那个", instruction))
+    if re.search(r"(?:不要|别|不用|不必|无需|不能|不想)(?:再)?(?:删除|删|移除|去掉|取消)|取消(?:本次|这次)?(?:修改|调整|操作)", instruction):
+        return False
+    # “不用换成别的”仍然是纯删除；明确要求替换时保留原修改流程。
+    text = re.sub(r"(?:不要|不用|不必|无需|别)(?:再)?(?:替换|换成|换为|改成|改为|更换)", "", instruction)
+    return not re.search(r"替换|换成|换为|改成|改为|更换", text) and bool(re.search(r"删除|删|移除|去掉|取消|不去|不想去|不要去|不要这|不要该|不要这个|不要那个", text))
+
+
+def _select_delete_targets(blocks: list[dict], modify: dict, instruction: str) -> list[dict]:
+    """Resolve a deletion to existing IDs; unique short names are allowed, guesses are not."""
+    if modify.get("block_ids"):
+        return _select_targets(blocks, modify)
+    targets = modify.get("targets") or []
+    if not isinstance(targets, list):
+        raise HTTPException(status_code=422, detail="计划修改目标无效")
+    if not targets:
+        # Common free-text forms: 删除雕塑园 / 把雕塑园删了 / 雕塑园不去了。
+        targets = []
+        day_match = re.search(r"第(\d+|[一二三四五六七八九十])天", instruction)
+        day = modify.get("day")
+        if day is None and day_match:
+            value = day_match[1]
+            day = int(value) if value.isdigit() else "一二三四五六七八九十".index(value) + 1
+        for clause in re.split(r"[，,。；;\n]", instruction):
+            match = re.search(r"(.+?)(?:删除|删掉|删去|删了|删|移除|去掉|取消|不去了?)(?:吧|了)?$", clause.strip())
+            if not match:
+                match = re.search(r"(?:删除|删掉|删去|移除|去掉|取消|不想去|不要去|不去)(.+)", clause)
+            if not match:
+                continue
+            name = match[1].strip()
+            name = re.sub(r"^(?:请|帮我|帮忙|麻烦|我想|我|把|将|(?:从)?(?:计划|行程)(?:中|里)(?:的)?|第(?:\d+|[一二三四五六七八九十])天)+", "", name)
+            name = re.sub(r"(?:这个景点|这个条目|这一项|吧|了)$", "", name).strip()
+            targets.append({"name": name, **({"day": day} if day is not None else {})})
+
+    def normalized(value) -> str:
+        return re.sub(r"[\s·•（）()「」『』\"'《》]", "", str(value or ""))
+
+    selected = []
+    for target in targets:
+        if isinstance(target, str) and any(b["id"] == target for b in blocks):
+            matches = [b for b in blocks if b["id"] == target]
+        elif isinstance(target, dict) and target.get("id"):
+            matches = [b for b in blocks if b["id"] == target["id"]]
+        else:
+            name = normalized(target.get("name") if isinstance(target, dict) else target)
+            candidates = [b for b in blocks if not isinstance(target, dict) or all(
+                target.get(key) is None or str(target[key]) == str(b.get(key)) for key in ("type", "day", "plan_style"))]
+            matches = [b for b in candidates if normalized(b.get("name")) == name] if name else []
+            if not matches and len(name) >= 2:
+                matches = [b for b in candidates if name in normalized(b.get("name"))]
+        if not matches:
+            raise HTTPException(status_code=422, detail="没有找到要删除的计划，请在列表中选择后重试")
+        if len(matches) > 1:
+            raise HTTPException(status_code=422, detail="找到多个同名或相似的计划，请选择要删除的条目")
+        if matches[0] not in selected:
+            selected.append(matches[0])
+    return selected
 
 
 _ITEM_FIELDS = {"type", "time", "name", "note", "link", "lng", "lat", "poi_id", "price", "options", "selected_option", "rating", "distance_m", "cuisine", "address", "source_option_id", "walking_distance_m", "walking_duration_s", "walking_origin"}
@@ -535,13 +590,21 @@ def plan_stream(payload: PlanRequest):
     return _orchestrator_stream(data)
 
 
-def _orchestrator_stream(data: dict, repair=False):
+@router.post("/guide/stream")
+def city_guide_stream(payload: PlanRequest):
+    if not payload.destination or not payload.destination.strip():
+        raise HTTPException(status_code=422, detail="缺少目的地")
+    return _orchestrator_stream({"destination": payload.destination}, guide=True)
+
+
+def _orchestrator_stream(data: dict, repair=False, guide=False):
     async def event_stream():
         proc = None
         stderr_task = None
         try:
             proc = await asyncio.create_subprocess_exec(
-                str(ORCHESTRATOR_PYTHON), str(ORCHESTRATOR_PY), "--stream", *(["--repair"] if repair else []),
+                *([str(SEARCH_PYTHON), str(SEARCH_PY), "--guide-stream"] if guide else
+                  [str(ORCHESTRATOR_PYTHON), str(ORCHESTRATOR_PY), "--stream", *(["--repair"] if repair else [])]),
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 env=_subprocess_env(), start_new_session=True, limit=4 * 1024 * 1024,
             )
@@ -706,8 +769,21 @@ def create_plan(payload: PlanRequest) -> dict:
         blocks.insert(index, item)
         return finalize(blocks, [item], refresh_food=item.get("type") != "美食")
 
-    selected = _select_targets(scoped, modify)
     instruction = str(modify.get("instruction") or "").strip()
+    if action == "delete" or (action == "modify" and _is_delete_instruction(instruction)):
+        selected = _select_delete_targets(scoped, modify, instruction)
+        if not selected:
+            raise HTTPException(status_code=422, detail="请选择需要删除的计划")
+        ids = {block["id"] for block in selected}
+        remaining = [block for block in blocks if block["id"] not in ids]
+        # 删除只移除条目并重算路线/费用；不替换景点，也不重新选择剩余餐厅。
+        result = finalize(remaining, selected, refresh_food=False)
+        if not result.get("error"):
+            result["mutation"] = {"action": "delete", "removed_block_ids": [b["id"] for b in selected],
+                                  "removed_names": [b.get("name") or "" for b in selected]}
+        return result
+
+    selected = _select_targets(scoped, modify)
     if action == "update":
         if len(selected) != 1:
             raise HTTPException(status_code=422, detail="请选择一条计划进行更新")
@@ -743,13 +819,6 @@ def create_plan(payload: PlanRequest) -> dict:
             return classification
         modify.update(classification)
         selected = _select_targets(scoped, modify)
-    if action == "delete" or (selected and _is_delete_instruction(instruction)):
-        if not selected:
-            raise HTTPException(status_code=422, detail="请选择需要删除的计划")
-        ids = {block["id"] for block in selected}
-        remaining = [block for block in blocks if block["id"] not in ids]
-        return finalize(remaining, selected, refresh_food=any(block.get("type") != "美食" for block in selected))
-
     if modify.get("mode") == "global" and not selected:
         trip_context = _global_trip_context(instruction,
             {**((payload.plan or {}).get("basic") or {}), **basic}, start_date, end_date)

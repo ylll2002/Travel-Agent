@@ -76,7 +76,7 @@ class FinalizeContractTests(unittest.TestCase):
         result = {"destination": "杭州", "start_date": "2026-10-20", "end_date": "2026-10-21", "plans": [{"style": "经典", "itinerary": [{"day": 1, "date": "2026-10-20", "schedule": [{"id": "s1", "type": "景点", "name": "景点", "time": "09:00-11:00"}]}]}]}
         payload = {"plan": result, "modify": {"mode": "global", "instruction": "节奏轻松一些"}, "defer_finalize": True}
         output = io.StringIO()
-        with patch("plan.sys.stdin", io.StringIO(json.dumps(payload))), patch("plan.modify_plan", return_value=result), patch("plan.finalize_plan") as finalize, redirect_stdout(output):
+        with patch.dict("plan.os.environ", {"OPENAI_API_KEY": "local-test-only"}), patch("plan.sys.stdin", io.StringIO(json.dumps(payload))), patch("plan.modify_plan", return_value=result), patch("plan.finalize_plan") as finalize, redirect_stdout(output):
             plan.main()
         finalize.assert_not_called()
         response = json.loads(output.getvalue())

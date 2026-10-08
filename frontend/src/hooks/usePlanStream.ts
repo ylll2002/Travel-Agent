@@ -16,7 +16,7 @@ export function usePlanStream() {
     async (
       payload: Record<string, unknown>,
       onEvent: (event: PlanStreamEvent) => void,
-      path: "/plan/stream" | "/plan/repair/stream" = "/plan/stream",
+      path: "/plan/stream" | "/plan/repair/stream" | "/plan/guide/stream" = "/plan/stream",
     ) => {
       controllerRef.current?.abort();
       const controller = new AbortController();

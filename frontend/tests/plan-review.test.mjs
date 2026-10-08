@@ -6,19 +6,9 @@ import ts from 'typescript';
 // Run the actual TS module with the existing compiler; no test-framework dependency.
 const source = await readFile(new URL('../src/lib/planReview.ts', import.meta.url), 'utf8');
 const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
-const { confirmationReason, issueTarget, reviewHeading, currentAudit, currentPlanAudit, reviewMessage, canAutoRepair, advanceReviewProgress, missingApiKeyMessage } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
+const { confirmationReason, issueTarget, reviewHeading, currentAudit, currentPlanAudit, reviewMessage, canAutoRepair, advanceReviewProgress } = await import(`data:text/javascript;base64,${Buffer.from(code).toString('base64')}`);
 const passed = { schema_version: 1, plan_revision: 4, status: 'passed', passed: true, issues: [] };
 const issue = { severity: 'high', detail: '赶不上列车' };
-
-test('missing API key is visible in chat while other failure messages remain unchanged', () => {
-  const error = '未配置模型 API Key，请先在服务端配置 API Key 后重试。';
-  const audit = { ...passed, status: 'error', passed: false, error };
-  assert.equal(missingApiKeyMessage(error), error);
-  assert.equal(reviewMessage(audit), error);
-  assert.equal(canAutoRepair(audit), false);
-  for (const value of [undefined, '服务超时', '额度不足']) assert.equal(missingApiKeyMessage(value), undefined);
-  assert.equal(reviewMessage({ ...audit, error: '服务超时' }), '审核暂未完成，当前版本需要重新审核。');
-});
 
 test('editing a new revision never reuses the preceding passing verdict', () => {
   assert.equal(currentAudit(passed, 5), null);
@@ -164,15 +154,6 @@ test('only verified actionable high failures start automatic repair', () => {
     {...bad,issues:[{...issue,actionable:false}]},{...passed,status:'warning',issues:[{...issue,severity:'medium',actionable:true}]}]) {
     assert.equal(canAutoRepair(audit),false);
   }
-});
-
-test('deleting a plan item keeps the gap instead of automatically repairing it', () => {
-  const bad = {...passed,status:'blocked',passed:false,issues:[{...issue,actionable:true}]};
-  assert.equal(canAutoRepair(bad, 'delete'), false);
-  assert.equal(canAutoRepair(bad, 'modify'), true);
-  assert.equal(canAutoRepair(bad, 'add'), true);
-  assert.equal(canAutoRepair(bad, 'update'), true);
-  assert.equal(canAutoRepair({...bad,status:'error',error:'未配置模型 API Key，请先配置。'}, 'modify'), false);
 });
 
 test('live review keeps failed reasons during repair and hides old verdict on the next snapshot', () => {

@@ -39,13 +39,7 @@ export function currentAudit(value: unknown, revision: unknown): PlanAudit | nul
   return audit as PlanAudit;
 }
 
-export function missingApiKeyMessage(error: unknown): string | undefined {
-  return typeof error === 'string' && error.includes('未配置模型 API Key') ? error : undefined;
-}
-
 export function reviewMessage(audit: PlanAudit | null): string {
-  const configurationMessage = missingApiKeyMessage(audit?.error);
-  if (configurationMessage) return configurationMessage;
   if (!audit || audit.status === 'error') return '审核暂未完成，当前版本需要重新审核。';
   // Details and evidence live in the plan panel; chat only reports the outcome.
   if (!audit.passed) return '当前行程需要调整，请查看审核窗口的审核结果。';
@@ -106,8 +100,8 @@ export type ReviewProgress = {
   entries: Array<{ stage: string; revision?: number; reasons: string[] }>;
 };
 
-export function canAutoRepair(audit: PlanAudit | null, action?: unknown): boolean {
-  return action !== 'delete' && !!audit && audit.status === 'blocked' && !audit.error && !audit.passed
+export function canAutoRepair(audit: PlanAudit | null): boolean {
+  return !!audit && audit.status === 'blocked' && !audit.error && !audit.passed
     && audit.issues.some(issue => issue.severity === 'high' && issue.actionable);
 }
 

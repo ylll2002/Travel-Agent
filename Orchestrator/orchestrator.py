@@ -28,6 +28,8 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from shared.audit import failed_audit, high_actionable_issues, history_entry, normalize_audit, repair_feedback
 
 SEARCH_PY = ROOT / "SearchAgent" / "search.py"
 SEARCH_PYTHON = ROOT / "SearchAgent" / ".venv" / "bin" / "python"
@@ -238,14 +240,7 @@ def _search_for_validate(search: dict | None, plan: dict | None) -> dict:
 
 
 def _high_actionable_issues(audit: dict | None) -> list[dict]:
-    """仅返回能够用现有行程/候选修复的严重问题；轻微建议不触发重跑。"""
-    if not isinstance(audit, dict) or not isinstance(audit.get("issues"), list):
-        return []
-    return [issue for issue in audit["issues"] if isinstance(issue, dict)
-            and str(issue.get("severity") or "").strip().lower() == "high"
-            and issue.get("actionable") is not False
-            and isinstance(issue.get("detail"), str) and issue["detail"].strip()
-            and isinstance(issue.get("suggestion"), str) and issue["suggestion"].strip()]
+    return high_actionable_issues(audit)
 
 
 def validate_node(state: State) -> dict:
@@ -261,35 +256,14 @@ def validate_node(state: State) -> dict:
             "basic": state.get("basic"),
         },
     )
-    if not isinstance(result, dict) or not isinstance(result.get("passed"), bool):
+    try:
+        result = normalize_audit(result, state.get("plan"))
+    except (ValueError, TypeError):
         error = (result.get("error") if isinstance(result, dict) else None) or "审核结果不可用"
-        result = {"passed": False, "issues": [], "feedback": "审核未返回有效结论", "error": error}
-    elif result.get("error"):
-        # 服务错误不是有效审核结论，不能报告已经通过。
-        result = {**result, "passed": False}
+        result = failed_audit(error, "审核未返回有效结论", state.get("plan"))
     history = list(state.get("history") or [])
-    history.append(
-        {
-            "iteration": state.get("iteration", 0),
-            "passed": result.get("passed"),
-            "issues": result.get("issues"),
-            **({"error": result["error"]} if result.get("error") else {}),
-        }
-    )
-    high_issues = _high_actionable_issues(result)
-    feedback = None
-    if result.get("passed") is False and not result.get("error") and high_issues:
-        feedback = (
-            "审核发现以下有证据、影响执行且可修复的严重问题。请针对这些问题重新规划，"
-            "保持用户的目的地、日期、硬预算及偏好，使用已有真实候选；"
-            "不要把轻微优化建议当成新增硬约束，也不要捏造未知报价。严重问题："
-            + json.dumps(high_issues, ensure_ascii=False)
-        )
-    return {
-        "audit": result,
-        "history": history,
-        "feedback": feedback,
-    }
+    history.append(history_entry(state.get("iteration", 0), result))
+    return {"audit": result, "history": history, "feedback": repair_feedback(result)}
 
 
 def should_continue(state: State) -> str:

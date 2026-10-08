@@ -9,6 +9,9 @@ from dotenv import load_dotenv
 from openai import OpenAI
 
 BASE_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(BASE_DIR.parent))
+from shared.audit import failed_audit, normalize_audit
+
 load_dotenv(BASE_DIR / ".env")
 
 VALIDATE_SYSTEM_PROMPT = (
@@ -41,12 +44,15 @@ VALIDATE_SYSTEM_PROMPT = (
     '{"passed":true或false,"issues":[{"severity":"high或medium或low","type":"预算或交通或偏好或天气或时间或完整性",'
     '"detail":"有证据的问题描述","suggestion":"具体修正或核实建议","actionable":true或false}],'
     '"feedback":"给PlanAgent的总体修改建议；没有严重问题时说明优化建议不影响执行"}。'
-    "只有真的无问题时issues=[]。只输出JSON，不要额外文字。"
+    "每个issue还应提供plan_style、day、date、block_ids和evidence。"
+    "定位仅使用输入中真实的方案名称、日期和活动id；整项检查或不能确定位置时用null和空列表，不能猜测id。"
+    "evidence是包含path和value的列表，path指向输入JSON字段，value记录该字段的实际值；没有证据时用空列表。"
+    "type还可使用真实性。只有真的无问题时issues=[]。只输出JSON，不要额外文字。"
 )
 
 
-def _failed_audit(error: str, feedback: str) -> dict:
-    return {"passed": False, "issues": [], "feedback": feedback, "error": error}
+def _failed_audit(error: str, feedback: str, plan: dict | None = None) -> dict:
+    return failed_audit(error, feedback, plan)
 
 
 def validate_plan(
@@ -63,7 +69,7 @@ def validate_plan(
     try:
         client = OpenAI(**kwargs, max_retries=0)
     except Exception:
-        return _failed_audit("审核服务不可用", "审核初始化失败，请检查模型配置后重试")
+        return _failed_audit("审核服务不可用", "审核初始化失败，请检查模型配置后重试", plan)
 
     context: dict = {"plan": plan}
     if profile:
@@ -90,7 +96,7 @@ def validate_plan(
                 timeout=45,
             )
         except Exception:
-            return _failed_audit("审核服务不可用", "审核调用失败，请稍后重试")
+            return _failed_audit("审核服务不可用", "审核调用失败，请稍后重试", plan)
         try:
             content = (resp.choices[0].message.content or "{}").strip()
         except (AttributeError, IndexError, TypeError):
@@ -103,10 +109,13 @@ def validate_plan(
             result = json.loads(content)
         except json.JSONDecodeError:
             result = {}
-        if (isinstance(result, dict) and isinstance(result.get("passed"), bool)
-                and isinstance(result.get("issues", []), list) and not result.get("error")):
-            return result
-    return _failed_audit("审核结果不可用", "审核未返回有效结论")
+        try:
+            if isinstance(result, dict) and result.get("error"):
+                continue
+            return normalize_audit(result, plan)
+        except (ValueError, TypeError):
+            continue
+    return _failed_audit("审核结果不可用", "审核未返回有效结论", plan)
 
 
 def main() -> None:
@@ -120,18 +129,18 @@ def main() -> None:
             raw = " ".join(sys.argv[1:]).strip()
 
     if not raw:
-        print(json.dumps({"error": "empty input"}, ensure_ascii=False))
+        print(json.dumps(_failed_audit("empty input", "请提供要审核的行程"), ensure_ascii=False))
         return
 
     try:
         data = json.loads(raw)
         result = validate_plan(
-            data.get("plan") or {},
-            data.get("profile"),
-            data.get("preferences"),
-            data.get("recent_trips"),
-            data.get("search"),
-            data.get("basic"),
+            plan=data.get("plan") or {},
+            profile=data.get("profile"),
+            preferences=data.get("preferences"),
+            recent_trips=data.get("recent_trips"),
+            search=data.get("search"),
+            basic=data.get("basic"),
         )
     except Exception:  # noqa: BLE001
         result = _failed_audit("审核失败", "审核未能完成，请稍后重试")

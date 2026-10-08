@@ -1,6 +1,8 @@
 import copy
 import unittest
 
+from unittest.mock import patch
+import orchestrator as flow
 from orchestrator import _plan_for_validate, _search_for_validate
 
 
@@ -30,6 +32,37 @@ class AuditContextTests(unittest.TestCase):
         self.assertEqual(result["weather"], search["weather"])
         self.assertEqual(result["food"], search["food"][:1])
         self.assertNotIn("social_food", result)
+
+    def test_main_flow_preserves_audit_locations_revision_and_history(self):
+        plan = {"revision": 7, "blocks": [{"id": "b1", "plan_style": "经典", "day": 1, "date": "2026-10-10"}]}
+        issue = {"severity": "high", "type": "时间", "detail": "赶不上列车", "suggestion": "提前结束",
+                 "actionable": True, "plan_style": "经典", "day": 1, "date": "2026-10-10", "block_ids": ["b1"],
+                 "evidence": [{"path": "plan.legs[0].duration_s", "value": 2700}]}
+        state = {"plan": plan, "iteration": 1, "profile": {"city": "福州"},
+                 "preferences": {"culture": True}, "recent_trips": [{"destination": "上海"}],
+                 "search": {"weather": {"rain": True}}, "basic": {"total_budget": 4000}}
+        with patch.object(flow, "_call", return_value={"passed": False, "issues": [issue]}) as call:
+            result = flow.validate_node(state)
+        payload = call.call_args.args[2]
+        for key in ("profile", "preferences", "recent_trips", "basic"):
+            self.assertEqual(payload[key], state[key])
+        self.assertEqual(payload["search"]["weather"], state["search"]["weather"])
+        self.assertEqual(result["audit"]["plan_revision"], 7)
+        self.assertEqual(result["audit"]["status"], "blocked")
+        self.assertEqual(result["history"][0]["issues"][0]["block_ids"], ["b1"])
+        self.assertEqual(result["history"][0]["issues"][0]["evidence"], issue["evidence"])
+        self.assertIn("赶不上列车", result["feedback"])
+
+    def test_invented_location_is_service_error_and_does_not_replan(self):
+        plan = {"revision": 1, "blocks": [{"id": "real"}]}
+        raw = {"passed": False, "issues": [{"severity": "high", "detail": "冲突", "suggestion": "修改",
+                                           "actionable": True, "block_ids": ["invented"]}]}
+        with patch.object(flow, "_call", return_value=raw):
+            result = flow.validate_node({"plan": plan, "iteration": 1})
+        self.assertEqual(result["audit"]["status"], "error")
+        self.assertFalse(result["audit"]["passed"])
+        self.assertIsNone(result["feedback"])
+        self.assertEqual(flow.should_continue({"plan": plan, "iteration": 1, **result}), "end")
 
 
 if __name__ == "__main__":

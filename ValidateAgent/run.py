@@ -13,12 +13,17 @@ else:
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT = BASE_DIR.parent
+
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from agent_env import component_python, subprocess_env
 sys.path.insert(0, str(ROOT))
 from shared.audit import failed_audit, history_entry, next_plan_revision, normalize_audit, repair_feedback, without_review
 from shared.sources import merge_plan_sources
 
 PLAN_PY = ROOT / "PlanAgent" / "plan.py"
-PLAN_PYTHON = ROOT / "PlanAgent" / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+PLAN_PYTHON = component_python("PlanAgent")
 
 
 def generate_plan(context: dict, feedback: str | None = None) -> dict:
@@ -32,6 +37,9 @@ def generate_plan(context: dict, feedback: str | None = None) -> dict:
         input=json.dumps(payload, ensure_ascii=False),
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=subprocess_env(),
         timeout=300,
     )
     if proc.returncode:

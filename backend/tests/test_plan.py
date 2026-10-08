@@ -1,8 +1,12 @@
 import asyncio
 import copy
 import json
+import os
+import queue
 import signal
+import time
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -17,6 +21,48 @@ from app.api.routes.plan import (
     plan_stream,
     city_guide_stream,
 )
+
+
+def fake_popen(stdout_lines, block=False):
+    """构造 subprocess.Popen 替身：stdout 是 line-buffered 的字节流。
+
+    流式实现现在用线程读取 Popen 的管道（Windows 的 --reload 下 Selector
+    事件循环不支持 asyncio 子进程），因此替身只需提供同步接口。
+    block=True 时永不返回 EOF，用于验证"客户端断开即清理子进程"。
+    """
+    items = queue.Queue()
+    for line in stdout_lines:
+        items.put(line)
+    if not block:
+        items.put(b"")
+
+    proc = MagicMock()
+    proc.pid = 43210
+    proc.returncode = None
+    proc.stdin = MagicMock()
+    proc.stderr = MagicMock()
+    proc.stderr.readline.return_value = b""
+
+    def readline():
+        while True:
+            try:
+                return items.get_nowait()
+            except queue.Empty:
+                if block:
+                    time.sleep(0.02)
+                    continue
+                return b""
+
+    proc.stdout = MagicMock()
+    proc.stdout.readline.side_effect = readline
+
+    def wait(timeout=None):
+        proc.returncode = 0
+        return 0
+
+    proc.wait.side_effect = wait
+    proc.poll.side_effect = lambda: proc.returncode
+    return proc
 
 
 BLOCKS = [
@@ -189,18 +235,18 @@ class PlanMutationTests(unittest.TestCase):
 
 class StreamCancellationTests(unittest.IsolatedAsyncioTestCase):
     async def test_city_guide_stream_uses_search_agent_and_only_destination(self):
-        proc = SimpleNamespace(pid=43210, returncode=0, stdin=MagicMock(), stdout=MagicMock(),
-                               stderr=MagicMock(), wait=AsyncMock(return_value=0))
-        proc.stdin.drain = AsyncMock()
-        proc.stdout.readline = AsyncMock(side_effect=[
+        proc = fake_popen([
             b'{"type":"guide","text":"city introduction"}\n',
-            b'{"type":"final","data":{}}\n', b''])
-        proc.stderr.read = AsyncMock(return_value=b'')
+            b'{"type":"final","data":{}}\n',
+        ])
         response = city_guide_stream(PlanRequest(destination="杭州", basic={"budget": 1000}))
-        with patch("app.api.routes.plan.asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)) as launch:
+        with patch("app.api.routes.plan.subprocess.Popen", return_value=proc) as launch:
             events = [event async for event in response.body_iterator]
-        self.assertTrue(str(launch.call_args.args[1]).endswith('SearchAgent/search.py'))
-        self.assertEqual(launch.call_args.args[2], '--guide-stream')
+        argv = launch.call_args.args[0]
+        # 用 Path 比较，避免 Windows 反斜杠与 POSIX 正斜杠的差异
+        self.assertEqual(Path(argv[1]).name, "search.py")
+        self.assertEqual(Path(argv[1]).parent.name, "SearchAgent")
+        self.assertEqual(argv[2], '--guide-stream')
         self.assertEqual(json.loads(proc.stdin.write.call_args.args[0]), {"destination": "杭州"})
         self.assertIn('city introduction', events[0])
         self.assertIn('"final"', events[1])
@@ -212,30 +258,26 @@ class StreamCancellationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error.exception.status_code, 422)
 
     async def test_closing_city_guide_cleans_up_search_process(self):
-        proc = SimpleNamespace(pid=43210, returncode=None, stdin=MagicMock(), stdout=MagicMock(),
-                               stderr=MagicMock(), wait=AsyncMock(return_value=0))
-        proc.stdin.drain = AsyncMock()
-        proc.stdout.readline = AsyncMock(return_value=b'{"type":"guide","text":"intro"}\n')
-        proc.stderr.read = AsyncMock(return_value=b'')
+        proc = fake_popen([b'{"type":"guide","text":"intro"}\n'], block=True)
         response = city_guide_stream(PlanRequest(destination="杭州"))
-        with patch("app.api.routes.plan.asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)), patch("app.api.routes.plan.os.killpg") as killpg:
+        with patch("app.api.routes.plan.subprocess.Popen", return_value=proc), \
+                patch("app.api.routes.plan._stop_process_group", new=AsyncMock()) as cleanup:
             await response.body_iterator.__anext__()
             await response.body_iterator.aclose()
-        killpg.assert_called_once_with(proc.pid, signal.SIGTERM)
+        cleanup.assert_awaited_once_with(proc)
 
     async def test_closing_stream_terminates_entire_process_group(self):
-        proc = SimpleNamespace(pid=43210, returncode=None, stdin=MagicMock(), stdout=MagicMock(), stderr=MagicMock(), wait=AsyncMock(return_value=0), terminate=MagicMock(), kill=MagicMock())
-        proc.stdin.drain = AsyncMock()
-        proc.stdout.readline = AsyncMock(return_value=b'{"type":"progress"}\\n')
-        proc.stderr.read = AsyncMock(return_value=b"")
+        proc = fake_popen([b'{"type":"progress"}\n'], block=True)
         response = plan_stream(PlanRequest(destination="杭州", start_date="2026-10-20", end_date="2026-10-21"))
-        with patch("app.api.routes.plan.asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)) as launch, patch("app.api.routes.plan.os.killpg") as killpg:
+        with patch("app.api.routes.plan.subprocess.Popen", return_value=proc) as launch, \
+                patch("app.api.routes.plan._stop_process_group", new=AsyncMock()) as cleanup:
             first = await response.body_iterator.__anext__()
             self.assertIn('"progress"', first)
             await response.body_iterator.aclose()
-        self.assertTrue(launch.call_args.kwargs["start_new_session"])
-        killpg.assert_called_once_with(proc.pid, signal.SIGTERM)
-        proc.wait.assert_awaited()
+        # 仅在 POSIX 上传 start_new_session（Windows 无进程组概念）
+        if os.name == "posix":
+            self.assertTrue(launch.call_args.kwargs.get("start_new_session"))
+        cleanup.assert_awaited_once_with(proc)
 
 
 if __name__ == "__main__":

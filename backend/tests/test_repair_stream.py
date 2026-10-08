@@ -1,11 +1,55 @@
 """HTTP repair streams recheck snapshots and clean up children on cancellation."""
 import copy
 import json
+import queue
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import HTTPException
 from app.api.routes import plan as routes
+
+
+def fake_popen(stdout_lines, block=False):
+    """构造 subprocess.Popen 替身：stdout 是 line-buffered 的字节流。
+
+    流式实现现在用线程读取 Popen 的管道，所以替身只需提供 readline()/poll()/
+    terminate()/kill()/wait() 这些同步接口。block=True 时永不返回 EOF，
+    用于验证"客户端断开即清理子进程"。
+    """
+    items = queue.Queue()
+    for line in stdout_lines:
+        items.put(line)
+    if not block:
+        items.put(b"")
+
+    proc = MagicMock()
+    proc.pid = 43210
+    proc.returncode = None
+    proc.stdin = MagicMock()
+    proc.stderr = MagicMock()
+    proc.stderr.readline.return_value = b""
+
+    def readline():
+        while True:
+            try:
+                return items.get_nowait()
+            except queue.Empty:
+                if block:
+                    time.sleep(0.02)
+                    continue
+                return b""
+
+    proc.stdout = MagicMock()
+    proc.stdout.readline.side_effect = readline
+
+    def wait(timeout=None):
+        proc.returncode = 0
+        return 0
+
+    proc.wait.side_effect = wait
+    proc.poll.side_effect = lambda: proc.returncode
+    return proc
 
 
 class RepairRequestTests(unittest.TestCase):
@@ -51,25 +95,23 @@ class RepairSSETests(unittest.IsolatedAsyncioTestCase):
     async def test_forwards_rounds_in_order_and_launches_repair_mode(self):
         events=[{"type":"node","stage":"reviewing"},{"type":"node","stage":"repairing","audit":{"passed":False}},
                 {"type":"node","stage":"passed"},{"type":"final","data":{"passed":True}}]
-        proc=SimpleNamespace(pid=43210,returncode=0,stdin=MagicMock(),stdout=MagicMock(),stderr=MagicMock(),wait=AsyncMock())
-        proc.stdin.drain=AsyncMock()
-        proc.stdout.readline=AsyncMock(side_effect=[json.dumps(e).encode()+b"\n" for e in events]+[b""])
-        proc.stderr.read=AsyncMock(return_value=b"")
+        # 流式实现改为线程读取 subprocess.Popen 的管道（Windows 的 --reload 下
+        # Selector 事件循环不支持 asyncio 子进程），因此这里 mock Popen。
+        proc=fake_popen([json.dumps(e).encode()+b"\n" for e in events])
         response=routes.repair_stream(RepairRequestTests().request())
-        with patch.object(routes.asyncio,"create_subprocess_exec",new=AsyncMock(return_value=proc)) as launch,              patch.object(routes,"_stop_process_group",new=AsyncMock()) as cleanup:
+        with patch.object(routes.subprocess,"Popen",return_value=proc) as launch, \
+                patch.object(routes,"_stop_process_group",new=AsyncMock()) as cleanup:
             chunks=[chunk async for chunk in response.body_iterator]
-        self.assertIn("--repair",launch.call_args.args)
+        self.assertIn("--repair",launch.call_args.args[0])
         self.assertEqual([json.loads(c[6:].strip()) for c in chunks[:-1]],events)
         self.assertIn("[DONE]",chunks[-1])
         cleanup.assert_awaited_once_with(proc)
 
     async def test_cancel_repairs_stops_child_process_group(self):
-        proc=SimpleNamespace(pid=43210,returncode=None,stdin=MagicMock(),stdout=MagicMock(),stderr=MagicMock(),wait=AsyncMock())
-        proc.stdin.drain=AsyncMock()
-        proc.stdout.readline=AsyncMock(return_value=b'{"type":"node","stage":"reviewing"}\n')
-        proc.stderr.read=AsyncMock(return_value=b"")
+        proc=fake_popen([b'{"type":"node","stage":"reviewing"}\n'],block=True)
         response=routes.repair_stream(RepairRequestTests().request())
-        with patch.object(routes.asyncio,"create_subprocess_exec",new=AsyncMock(return_value=proc)),              patch.object(routes,"_stop_process_group",new=AsyncMock()) as cleanup:
+        with patch.object(routes.subprocess,"Popen",return_value=proc), \
+                patch.object(routes,"_stop_process_group",new=AsyncMock()) as cleanup:
             await response.body_iterator.__anext__()
             await response.body_iterator.aclose()
         cleanup.assert_awaited_once_with(proc)

@@ -6,10 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.api.routes.plan import PLAN_PYTHON, VALIDATE_PY, PlanRequest, create_plan
-from app.api.routes import plan as plan_routes
-from shared.audit import combine_audits
-from ValidateAgent.rules import validate_rules
+from app.api.routes.plan import PLAN_PYTHON, PlanRequest, create_plan
 
 
 BLOCKS = [
@@ -29,16 +26,6 @@ class ProductFlowIntegrationTests(unittest.TestCase):
         self.env_patch = patch("app.api.routes.plan._subprocess_env", return_value=env)
         self.env_patch.start()
         self.addCleanup(self.env_patch.stop)
-        original_runner = plan_routes._run_json
-        def offline_runner(python, script, data, *args, **kwargs):
-            if script == VALIDATE_PY:
-                rule = validate_rules(data["plan"], data["search"], data["basic"])
-                model = {"passed": True, "issues": []} if rule["passed"] else None
-                return combine_audits(rule, model, data["plan"])
-            return original_runner(python, script, data, *args, **kwargs)
-        self.review_patch = patch("app.api.routes.plan._run_json", side_effect=offline_runner)
-        self.review_patch.start()
-        self.addCleanup(self.review_patch.stop)
 
     def make_request(self, modification, **kwargs):
         metadata = {"blocks": copy.deepcopy(BLOCKS), "summaries": {"经典": "文化路线", "轻松": "悠闲路线"}, "food": [{"name": "原候选", "price_per_person": 60, "day": 1, "plan_style": "经典"}]}

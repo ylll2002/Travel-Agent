@@ -255,19 +255,18 @@ class TestFetchFoodFallback(unittest.TestCase):
         })
         self.assertEqual(budget, 50)
 
-    def test_first_search_preloads_food_for_frontend_display(self):
+    def test_first_search_defers_restaurants_until_plan_exists(self):
         import tools
-        food_items = [{"name": "餐厅1"}]
         with patch("tools._read_cache", return_value=None), patch("tools._write_cache"), \
              patch("tools._fetch_weather", return_value={}), \
              patch("tools._fetch_hotels", return_value=[]), \
              patch("tools._fetch_poi_distributed", return_value=[]), \
              patch("tools._fetch_events", return_value=[]), \
              patch("tools._fetch_social_food", return_value=[]), \
-             patch("tools._fetch_food", return_value=food_items) as food:
+             patch("tools._fetch_food") as food:
             result = tools.run_search({"destination": "杭州", "start_date": "2026-10-10"})
-        food.assert_called_once()
-        self.assertEqual(result["food"], food_items)
+        food.assert_not_called()
+        self.assertEqual(result["food"], [])
         self.assertTrue(result["food_search_pending"])
 
     def test_repeated_anchors_are_deduplicated_and_searched_concurrently(self):

@@ -34,6 +34,7 @@ from amap_service import search_restaurants
 BASE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE_DIR.parent))
 from agent_env import subprocess_env  # noqa: E402
+from shared.pricing import parse_price  # noqa: E402
 
 load_dotenv(BASE_DIR / ".env")
 
@@ -666,41 +667,6 @@ def _poi_hot_key(item: dict):
     if not match:
         return (1, 0)
     return (0, int(match.group(1)))
-
-
-def _matches_requested_poi(requested: str, candidate: str) -> bool:
-    """判断候选景点是否就是用户点名的景点；容忍景区常用后缀，避免“西湖天地”冒充“西湖”。"""
-    _place_suffix = re.compile(
-        r"(?:风景名胜区|风景区|景区|博物院|博物馆|纪念馆|展览馆|馆区|分馆|公园|乐园|植物园|动物园|海洋馆)$"
-    )
-
-    def normalize(value: str) -> str:
-        value = re.sub(r"[（(].*?[）)]", "", str(value)).strip()
-        return _place_suffix.sub("", value)
-
-    expected, actual = normalize(requested), normalize(candidate)
-    if not expected or not actual:
-        return False
-    if expected == actual:
-        return True
-    # 较长名称之间允许包含关系（如“故宫博物院”与“故宫”），短名不参与包含判断。
-    if len(expected) >= 4 and len(actual) >= 4 and (expected in actual or actual in expected):
-        return True
-    return False
-
-
-def _exact_poi_match(requested: str, candidate: str) -> bool:
-    """严格匹配：规范化后完全相等，避免把「武汉大学樱花大道」当成「武汉大学」。"""
-    _place_suffix = re.compile(
-        r"(?:风景名胜区|风景区|景区|博物院|博物馆|纪念馆|展览馆|馆区|分馆|公园|乐园|植物园|动物园|海洋馆)$"
-    )
-
-    def normalize(value: str) -> str:
-        value = re.sub(r"[（(].*?[）)]", "", str(value)).strip()
-        return _place_suffix.sub("", value)
-
-    expected = normalize(requested)
-    return bool(expected) and expected == normalize(candidate)
 
 
 POI_CATEGORY_GROUPS = {
@@ -1441,51 +1407,12 @@ def _write_cache(key: str, result: dict) -> None:
         pass
 
 
-def _ensure_requested_pois(result: dict, destination: str, requested_pois: list[str]) -> list[str]:
-    """把用户点名但搜索结果里没有的景点单独补搜并入 poi；返回仍未找到的点名。"""
-    requested_pois = [str(name).strip() for name in (requested_pois or []) if str(name).strip()]
-    if not requested_pois:
-        return []
-    pois = result.get("poi")
-    if not isinstance(pois, list):
-        pois = []
-        result["poi"] = pois
-    existing = {str(p.get("name") or "").strip() for p in pois if str(p.get("name") or "").strip()}
-    missing: list[str] = []
-    for name in dict.fromkeys(requested_pois):
-        if any(_exact_poi_match(name, candidate) for candidate in existing):
-            continue
-        try:
-            extra = _fetch_poi(destination, keyword=name)
-        except Exception:
-            extra = []
-        # 只取一个最佳匹配，避免把「武汉大学樱花大道/万林艺术博物馆」等子景点都塞进必去。
-        match = next(
-            (item for item in extra if _exact_poi_match(name, str(item.get("name") or ""))),
-            None,
-        )
-        if match is None:
-            match = next((item for item in extra if str(item.get("name") or "").strip()), None)
-        if match is None:
-            missing.append(name)
-            continue
-        item_name = str(match.get("name") or "").strip()
-        if item_name not in existing:
-            existing.add(item_name)
-            match["requested"] = True
-            match["must_visit"] = True
-            match["source"] = "on_demand"
-            match["category_label"] = _category_label(match)
-            pois.append(match)
-    return missing
-
-
 def run_search(input_data: dict) -> dict:
     """输入 {destination, start_date, end_date?, origin?, basic?, food_keyword?}，
     并行搜索天气、酒店、景点、活动和交通，返回结构化 JSON。
 
-    basic 可含 total_budget（总预算）、travelers（出行人数）、purposes（旅行目的）。
-    此阶段也做一次全城餐厅搜索（仅用于前端候选展示）；规划仍用景点确定后的周边搜索。
+    basic 可含 total_budget（总预算）、travelers（出行人数）、purposes（旅行目的），
+    餐厅在景点行程确定后通过 run_food_search 查询；此阶段不做全城推荐。
     """
     destination = (input_data.get("destination") or "").strip()
     if not destination:
@@ -1508,27 +1435,13 @@ def run_search(input_data: dict) -> dict:
     if isinstance(trip_styles, str):
         trip_styles = [trip_styles]
     travel_styles = list(dict.fromkeys(list(profile_styles) + list(trip_styles)))
-    requested_pois = basic.get("requested_pois") or []
-    if isinstance(requested_pois, str):
-        requested_pois = [requested_pois]
-    requested_pois = [str(name).strip() for name in requested_pois if str(name).strip()]
-    requested_pois = list(dict.fromkeys(requested_pois))
 
     # 缓存需区分 travel_style（不同风格会多取/少取不同类别的景点）。
     cache_key = _cache_key(
         destination, start, end, origin,
-        extra=json.dumps(
-            {
-                "food": food_keyword,
-                "budget": max_price,
-                "travel_styles": sorted(travel_styles),
-                "requested_pois": requested_pois,
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-        ),
+        extra=json.dumps({"food": food_keyword, "budget": max_price, "travel_styles": sorted(travel_styles)}, ensure_ascii=False, sort_keys=True),
     )
-    cached = _read_cache(cache_key)
+    cached = None if input_data.get("force_refresh") else _read_cache(cache_key)
     if cached is not None:
         return cached
 
@@ -1548,7 +1461,6 @@ def run_search(input_data: dict) -> dict:
         "poi": lambda: _fetch_poi_distributed(destination, target=50, travel_styles=travel_styles),
         "events": lambda: _fetch_events(destination, start, end),
         "social_food": lambda: _fetch_social_food(destination),
-        "food": lambda: _fetch_food(destination, keyword=food_keyword, max_price=max_price, max_results=30),
     }
     if origin and origin != destination:
         tasks["flights"] = lambda: _fetch_round_trip(_fetch_flights, origin, destination, start, end)
@@ -1560,18 +1472,12 @@ def run_search(input_data: dict) -> dict:
             result[result_key] = value
 
     # 景点日程确定后，由 PlanAgent 用实际餐点位置调用 --food-nearby。
+    result["food"] = []
     result["food_search_pending"] = True
 
     # 飞猪数据源偶发抖动会整批返回空，重试一次并避免把空结果缓存 1 小时。
     if not isinstance(result.get("poi"), list) or not result["poi"]:
         result["poi"] = _fetch_poi_distributed(destination, target=50, travel_styles=travel_styles)
-    # 用户点名但榜单/分类结果里没有的景点，用关键词单独补搜。
-    missing_requested = _ensure_requested_pois(result, destination, requested_pois)
-    if missing_requested:
-        result.setdefault("warnings", [])
-        result["warnings"].append(
-            "未能搜索到用户点名景点：" + "、".join(missing_requested) + "。"
-        )
     if isinstance(result.get("poi"), list) and result["poi"]:
         _write_cache(cache_key, result)
     return result
@@ -1582,11 +1488,8 @@ def _estimate_food_budget(basic: dict) -> float | None:
     total_budget = basic.get("total_budget")
     if not total_budget:
         return None
-    try:
-        total = float(total_budget)
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(total) or total <= 0:
+    total = parse_price(total_budget)
+    if total is None or total <= 0:
         return None
 
     travelers = 1

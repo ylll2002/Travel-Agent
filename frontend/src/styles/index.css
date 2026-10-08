@@ -2116,6 +2116,23 @@ button:disabled {
   font-size: 10px;
 }
 
+.ta-plan-empty .ta-plan-mock-button {
+  margin-top: 8px;
+  padding: 8px 14px;
+  border: 1px solid #d9def0;
+  border-radius: 999px;
+  background: #fff;
+  color: #5267ff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ta-plan-empty .ta-plan-mock-button:hover {
+  border-color: rgba(82, 103, 255, 0.55);
+  background: #f6f7ff;
+}
+
 .ta-plan-styles {
   display: flex;
   flex-direction: column;
@@ -2147,6 +2164,10 @@ button:disabled {
   align-items: stretch;
 }
 
+.ta-plan-empty:has(.ta-plan-styles) .ta-plan-mock-button {
+  margin-top: auto;
+}
+
 .ta-plan-style {
   border: 1px solid #e8ebf3;
   border-radius: 12px;
@@ -2154,8 +2175,6 @@ button:disabled {
 }
 
 .ta-plan-style-card {
-  position: relative;
-  overflow: hidden;
   display: flex;
   flex: 1 1 0;
   min-height: 0;
@@ -2171,40 +2190,6 @@ button:disabled {
   font: inherit;
   text-align: left;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-
-.ta-plan-style-card.has-image {
-  border-color: transparent;
-}
-
-.ta-plan-style-card.has-image::before {
-  content: '';
-  position: absolute;
-  inset: -12px;
-  background-image: var(--cover-image);
-  background-size: cover;
-  background-position: center;
-  filter: blur(8px);
-  z-index: 0;
-}
-
-.ta-plan-style-card.has-image::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(rgba(20, 28, 45, 0.55), rgba(20, 28, 45, 0.72));
-  z-index: 0;
-}
-
-.ta-plan-style-card.has-image > * {
-  position: relative;
-  z-index: 1;
-}
-
-.ta-plan-style-card.has-image .ta-plan-style-name,
-.ta-plan-style-card.has-image .ta-plan-style-summary {
-  color: #fff;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
 .ta-plan-style-card:hover {
@@ -2232,81 +2217,6 @@ button:disabled {
   background: #fff;
   min-width: 0;
   overflow: hidden;
-}
-
-.ta-suggestion-bubble {
-  width: 100%;
-  max-width: 100%;
-  padding: 6px;
-  border-color: transparent;
-  background: transparent;
-}
-
-.ta-suggestion-scroll {
-  display: flex;
-  gap: 10px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-  scrollbar-width: thin;
-  scroll-snap-type: x proximity;
-}
-
-.ta-suggestion-card {
-  position: relative;
-  flex: 0 0 auto;
-  width: 160px;
-  display: flex;
-  flex-direction: column;
-  border: 1px solid #e8ebf3;
-  border-radius: 12px;
-  background: #fff;
-  overflow: hidden;
-  text-decoration: none;
-  scroll-snap-align: start;
-  cursor: pointer;
-}
-
-.ta-suggestion-kind {
-  position: absolute;
-  top: 7px;
-  left: 7px;
-  z-index: 1;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: rgba(20, 28, 45, 0.65);
-  color: #fff;
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.ta-suggestion-card:hover {
-  border-color: rgba(82, 103, 255, 0.45);
-  box-shadow: 0 4px 10px rgba(91, 83, 220, 0.1);
-}
-
-.ta-suggestion-card-img {
-  width: 100%;
-  height: 88px;
-  object-fit: cover;
-  background: #eef1f6;
-}
-
-.ta-suggestion-card-body {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 9px 11px 11px;
-}
-
-.ta-suggestion-card-body strong {
-  font-size: 13px;
-  color: #25314b;
-  line-height: 1.35;
-}
-
-.ta-suggestion-card-body span {
-  font-size: 11px;
-  color: #8a93a3;
 }
 
 .ta-plan-style-day {
@@ -2394,17 +2304,6 @@ button:disabled {
   color: #2f7d6b;
   font-size: 11px;
   font-weight: 700;
-}
-
-.ta-plan-block-leg {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 10px 2px 90px;
-  font-size: 11px;
-  color: #697386;
-  border-bottom: 1px dashed #e6ebf2;
-  background: #f7f9fc;
 }
 
 .ta-plan-block-options {
@@ -4464,7 +4363,7 @@ button:disabled {
   cursor: pointer;
 }
 
-.ta-plan-detail .ta-plan-confirm-button:hover {
+.ta-plan-detail .ta-plan-confirm-button:hover:not(:disabled) {
   background: #4356e8;
 }
 
@@ -5698,49 +5597,3 @@ button:disabled {
   font-weight: 700;
   box-shadow: none;
 }
-
-/* Current-version audit stays visible above the scrollable itinerary. */
-.ta-review { flex: 0 0 auto; border: 1px solid #d5deec; border-radius: 12px; padding: 10px 12px; margin-bottom: 10px; background: #f8faff; font-size: 13px; overflow-wrap: anywhere; }
-.ta-review-header { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
-.ta-review-header strong { font-size: 15px; }
-.ta-review-header span, .ta-review small { color: #53647d; }
-.ta-review p { margin: 5px 0; }
-.ta-review-passed { border-color: #95c5ad; background: #f2fbf5; }
-.ta-review-warning { border-color: #ddbf79; background: #fffaf0; }
-.ta-review-blocked, .ta-review-error { border-color: #dc9b98; background: #fff6f5; }
-.ta-review-checks { color: #4d5c70; font-size: 12px; }
-.ta-review summary { cursor: pointer; padding: 5px 0; }
-.ta-review-issues { list-style: none; padding: 0; margin: 0; max-height: 210px; overflow-y: auto; }
-.ta-review-issue { border-top: 1px solid #dce1e8; padding: 8px 0; }
-.ta-review-issue-high .ta-review-issue-meta strong { color: #a32924; }
-.ta-review button { border: 1px solid #8e9acb; border-radius: 7px; color: #354795; background: white; padding: 5px 9px; margin-top: 5px; cursor: pointer; }
-.ta-review button:disabled { opacity: .5; cursor: default; }
-.ta-review-evidence { font-size: 11px; color: #53647d; }
-.ta-review-evidence ul { padding-left: 16px; }
-.ta-review-evidence span { display: block; white-space: pre-wrap; }
-.ta-plan-block.ta-review-highlight { outline: 3px solid #d38a1b; outline-offset: -3px; background: #fff6df; }
-.ta-review-confirm-hint { margin: 6px 0 0; font-size: 12px; color: #8a4024; }
-.ta-city-guide { margin: 16px 0; padding: 20px; border: 1px solid #dce8f3; border-radius: 18px; background: linear-gradient(145deg, #fff, #f0f8ff); color: #20364b; }
-.ta-city-guide > strong { display: block; font-size: 16px; }
-.ta-generation-track { height: 6px; overflow: hidden; margin: 12px 0 8px; border-radius: 9px; background: #dfebf5; }
-.ta-generation-track > span { display: block; height: 100%; border-radius: inherit; background: #2585da; transition: width .5s ease; }
-.ta-city-guide small { color: #60788e; font-size: 11px; }
-.ta-city-guide h3 { margin: 20px 0 12px; font-size: 18px; }
-.ta-city-guide-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.85; font-size: 14px; }
-
-
-.ta-plan-column > .ta-plan-detail { flex: 1 1 0; height: auto; }
-
-
-.ta-floating-review { position:fixed; z-index:121; width:min(380px,calc(100vw - 24px)); max-height:min(360px,calc((100dvh - 100px)/2)); display:flex; flex-direction:column; overflow:hidden; border:1px solid #dce2ed; border-radius:16px; background:rgba(255,255,255,.98); box-shadow:0 8px 28px rgba(30,42,72,.14); }
-.ta-floating-review.expanded { width:min(620px,calc(100vw - 24px)); max-height:calc(100dvh - 92px); }
-.ta-floating-review > .ta-floating-map-handle { flex-shrink:0; padding:8px 12px; touch-action:none; }
-.ta-floating-review-actions, .ta-floating-review .ta-floating-map-actions { gap:6px; }
-.ta-floating-review .ta-floating-map-actions button { border:1px solid #dce2ed; background:#fff; border-radius:8px; padding:4px 8px; color:#53647d; cursor:pointer; }
-.ta-floating-review-body { min-height:0; overflow:auto; padding:8px; }
-.ta-floating-review-body .ta-review { margin:0; }
-.ta-floating-review-body .ta-review-issues { max-height:none; overflow:visible; }
-.ta-review-timeline ol { margin:4px 0; padding-left:20px; font-size:12px; }
-.ta-review-timeline li { padding:4px 0; border-top:1px solid #e1e5ed; }
-.ta-review-side-tab { position:fixed; right:0; top:96px; z-index:122; background:#fff; color:#4f63dd; border:1px solid #dce2ed; border-radius:10px 0 0 10px; padding:10px 12px; box-shadow:0 4px 16px #23354a15; cursor:pointer; }
-@media(max-width:640px) { .ta-floating-review { max-height:calc((100dvh - 100px)/2); } }

@@ -3,7 +3,7 @@ import unittest
 import io
 import json
 from unittest.mock import patch
-import run
+from ValidateAgent import run
 
 
 def issue(severity="high", actionable=True):

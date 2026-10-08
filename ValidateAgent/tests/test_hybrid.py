@@ -5,8 +5,8 @@ import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
 
-import validate
-import run
+from ValidateAgent import validate
+from ValidateAgent import run
 from ValidateAgent.rules import validate_rules
 from ValidateAgent.evidence import read_path, same_value
 from ValidateAgent.context import plan_for_model, search_for_model
@@ -33,7 +33,7 @@ def model_issue(kind="天气", evidence=None):
 
 class HybridTests(unittest.TestCase):
     def model(self, raw):
-        factory = patch("validate.OpenAI")
+        factory = patch("ValidateAgent.validate.OpenAI")
         stub = factory.start()
         self.addCleanup(factory.stop)
         client = stub.return_value
@@ -43,7 +43,7 @@ class HybridTests(unittest.TestCase):
 
     def test_rule_budget_block_skips_model_and_preserves_evidence(self):
         plan, search, basic = fixture(120)
-        with patch("validate.OpenAI") as factory:
+        with patch("ValidateAgent.validate.OpenAI") as factory:
             result = validate.validate_plan(plan, search=search, basic=basic)
         factory.assert_not_called()
         self.assertEqual(result["status"], "blocked")
@@ -64,14 +64,14 @@ class HybridTests(unittest.TestCase):
     def test_complete_candidates_are_used_before_model_trimming(self):
         plan, search, basic = fixture()
         search["poi"][0]["name"] = "其他博物馆"
-        with patch("validate.OpenAI") as factory:
+        with patch("ValidateAgent.validate.OpenAI") as factory:
             result = validate.validate_plan(plan, search=search, basic=basic)
         factory.assert_not_called()
         self.assertEqual(result["status"], "blocked")
         self.assertTrue(any(i["type"] == "真实性" and i["severity"] == "high" for i in result["issues"]))
 
     def test_invalid_rule_input_never_initializes_model(self):
-        with patch("validate.OpenAI") as factory:
+        with patch("ValidateAgent.validate.OpenAI") as factory:
             result = validate.validate_plan({"blocks": 123})
         factory.assert_not_called()
         self.assertEqual(result["status"], "error")
@@ -140,7 +140,7 @@ class HybridTests(unittest.TestCase):
                     {"path": "basic.unknown", "value": 1}]):
             with self.subTest(evidence=ev):
                 plan, search, basic = fixture()
-                with patch("validate.OpenAI") as factory:
+                with patch("ValidateAgent.validate.OpenAI") as factory:
                     factory.return_value.chat.completions.create.return_value = SimpleNamespace(choices=[
                         SimpleNamespace(message=SimpleNamespace(content=json.dumps({"passed": False, "issues": [model_issue(evidence=ev)]})))])
                     result = validate.validate_plan(plan, search=search, basic=basic)
@@ -189,7 +189,7 @@ class HybridTests(unittest.TestCase):
             ("偏好", [{"path": "recent_trips[0].feedback", "value": "喜欢自然风景"}],
              {"recent_trips": [{"feedback": "喜欢自然风景"}]}),
             ("天气", [{"path": "plan.blocks[0].name", "value": "博物馆"}], {})):
-            with self.subTest(kind=kind), patch("validate.OpenAI") as factory:
+            with self.subTest(kind=kind), patch("ValidateAgent.validate.OpenAI") as factory:
                 factory.return_value.chat.completions.create.return_value = SimpleNamespace(choices=[
                     SimpleNamespace(message=SimpleNamespace(content=json.dumps({"passed": False, "issues": [model_issue(kind, evidence)]})))])
                 result = validate.validate_plan(plan, search=search, basic=basic, **extras)
@@ -205,7 +205,7 @@ class HybridTests(unittest.TestCase):
         for kind in ("预算", "完整性"):
             issue = model_issue(kind, evidence)
             issue["detail"] = "景点暂无报价，不能确认消费，所以无法通过"
-            with self.subTest(kind=kind), patch("validate.OpenAI") as factory:
+            with self.subTest(kind=kind), patch("ValidateAgent.validate.OpenAI") as factory:
                 factory.return_value.chat.completions.create.return_value = SimpleNamespace(choices=[
                     SimpleNamespace(message=SimpleNamespace(content=json.dumps({"passed": False, "issues": [issue]})))])
                 result = validate.validate_plan(plan, search=search, basic=basic)
@@ -237,7 +237,7 @@ class HybridTests(unittest.TestCase):
     def test_model_failure_keeps_rule_warning_summary_and_history(self):
         plan, search, basic = fixture()
         plan["blocks"][0]["price_known"] = False
-        with patch("validate.OpenAI") as factory:
+        with patch("ValidateAgent.validate.OpenAI") as factory:
             factory.return_value.chat.completions.create.side_effect = TimeoutError()
             result = validate.validate_plan(plan, search=search, basic=basic)
         self.assertEqual(result["status"], "error")
@@ -357,7 +357,7 @@ class HybridTests(unittest.TestCase):
             ("天气", [{"path": 'search["weather"]["days"][0]["weather"]', "value": "暴雨"}]),
             ("预算", [{"path": 'basic["hard_limits"]["ticket_price"]', "value": 20},
                       {"path": 'plan["blocks"][0]["price"]', "value": 30}])):
-            with self.subTest(kind=kind), patch("validate.OpenAI") as factory:
+            with self.subTest(kind=kind), patch("ValidateAgent.validate.OpenAI") as factory:
                 factory.return_value.chat.completions.create.return_value = SimpleNamespace(choices=[
                     SimpleNamespace(message=SimpleNamespace(content=json.dumps({"passed": False, "issues": [model_issue(kind, evidence)]})))])
                 self.assertEqual(validate.validate_plan(plan, search=search, basic=basic)["status"], "blocked")
@@ -384,7 +384,7 @@ class HybridTests(unittest.TestCase):
     def test_truncation_preserves_price_warning_without_passing_or_repairing(self):
         plan, search, basic = fixture()
         plan["blocks"][0].update(price_known=False, unit_price=None, price=0)
-        with patch("validate.OpenAI") as factory:
+        with patch("ValidateAgent.validate.OpenAI") as factory:
             client = factory.return_value
             client.chat.completions.create.return_value = SimpleNamespace(choices=[
                 SimpleNamespace(finish_reason="length", message=SimpleNamespace(content='{"passed":'))])

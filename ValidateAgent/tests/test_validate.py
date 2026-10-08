@@ -5,7 +5,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from validate import _validate_model as validate_plan
+from ValidateAgent.validate import _validate_model as validate_plan
 from shared.audit import normalize_audit
 
 
@@ -15,7 +15,7 @@ def response(content):
 
 class ValidateTests(unittest.TestCase):
     def model(self, contents):
-        stub = patch("validate.OpenAI")
+        stub = patch("ValidateAgent.validate.OpenAI")
         client_class = stub.start()
         self.addCleanup(stub.stop)
         client = client_class.return_value
@@ -61,7 +61,7 @@ class ValidateTests(unittest.TestCase):
 
     def test_malformed_or_missing_boolean_never_passes(self):
         for content in ("not JSON", "[]", "null", "{}", '{"passed":"true"}', '{"passed":true,"issues":{}}'):
-            with self.subTest(content=content), patch("validate.OpenAI") as factory:
+            with self.subTest(content=content), patch("ValidateAgent.validate.OpenAI") as factory:
                 factory.return_value.chat.completions.create.return_value = response(content)
                 result = validate_plan({})
                 self.assertIs(result["passed"], False)
@@ -70,7 +70,7 @@ class ValidateTests(unittest.TestCase):
                 self.assertEqual(factory.return_value.chat.completions.create.call_count, 2)
 
     def test_timeout_returns_failed_audit_without_retry_loop(self):
-        with patch("validate.OpenAI") as factory:
+        with patch("ValidateAgent.validate.OpenAI") as factory:
             factory.return_value.chat.completions.create.side_effect = TimeoutError("test timeout")
             result = validate_plan({})
             self.assertIs(result["passed"], False)
@@ -78,7 +78,7 @@ class ValidateTests(unittest.TestCase):
             self.assertEqual(factory.return_value.chat.completions.create.call_count, 1)
 
     def test_missing_model_configuration_never_passes(self):
-        with patch("validate.OpenAI", side_effect=ValueError("missing key")):
+        with patch("ValidateAgent.validate.OpenAI", side_effect=ValueError("missing key")):
             result = validate_plan({})
         self.assertIs(result["passed"], False)
         self.assertTrue(result["error"])
@@ -91,7 +91,7 @@ class ValidateTests(unittest.TestCase):
             {"passed": False, "issues": [{"severity": "high", "detail": "冲突", "suggestion": "修改", "block_ids": ["invented"]}]},
         ]
         for raw in invalid:
-            with self.subTest(raw=raw), patch("validate.OpenAI") as factory:
+            with self.subTest(raw=raw), patch("ValidateAgent.validate.OpenAI") as factory:
                 factory.return_value.chat.completions.create.return_value = response(json.dumps(raw))
                 result = validate_plan({})
                 self.assertEqual(result["status"], "error")
@@ -112,7 +112,7 @@ class ValidateTests(unittest.TestCase):
     def test_truncated_reply_gets_one_larger_complete_retry(self):
         truncated = SimpleNamespace(choices=[SimpleNamespace(finish_reason="length",
             message=SimpleNamespace(content='{"passed":true,"issues":['))])
-        with patch("validate.OpenAI") as factory:
+        with patch("ValidateAgent.validate.OpenAI") as factory:
             client = factory.return_value
             client.chat.completions.create.side_effect = [truncated, response('{"passed":true,"issues":[]}')]
             result = validate_plan({"revision": 3})
@@ -234,7 +234,7 @@ class ValidateTests(unittest.TestCase):
     def test_repeated_truncation_never_accepts_even_an_apparently_complete_verdict(self):
         complete_looking = SimpleNamespace(choices=[SimpleNamespace(finish_reason="length",
             message=SimpleNamespace(content='{"passed":true,"issues":[]}'))])
-        with patch("validate.OpenAI") as factory:
+        with patch("ValidateAgent.validate.OpenAI") as factory:
             client = factory.return_value
             client.chat.completions.create.return_value = complete_looking
             result = validate_plan({"revision": 3})

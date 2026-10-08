@@ -6,7 +6,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-import validate
+if __package__:
+    from . import validate
+else:
+    import validate
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT = BASE_DIR.parent

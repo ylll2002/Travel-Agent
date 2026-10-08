@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import rules
+from ValidateAgent import rules
 
 
 def block(id="a", name="西湖", kind="景点", style="经典", day=1, clock="09:00-11:00", **extra):

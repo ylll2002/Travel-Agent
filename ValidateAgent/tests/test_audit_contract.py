@@ -1,7 +1,7 @@
 """Contract tests exercise malformed responses and plan-location validation."""
 import copy
 import unittest
-import validate  # Adds the project root when this suite runs from the agent directory.
+from ValidateAgent import validate
 from shared.audit import failed_audit, high_actionable_issues, history_entry, normalize_audit
 
 

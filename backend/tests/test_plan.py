@@ -16,6 +16,7 @@ from app.api.routes.plan import (
     _run_json,
     create_plan,
     plan_stream,
+    city_guide_stream,
 )
 
 

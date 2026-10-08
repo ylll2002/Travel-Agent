@@ -21,15 +21,10 @@ import math
 import os
 import ssl
 import time
-import sys
 import urllib.parse
 import urllib.request
 from dataclasses import asdict, dataclass
 from typing import Any
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from shared.pricing import parse_price
 
 import certifi
 
@@ -247,9 +242,7 @@ def search_restaurants(
                     return None
 
             rating = positive_number(rating_raw)
-            price_per_person = parse_price(cost_raw)
-            if price_per_person == 0:
-                price_per_person = None  # AMap cost=0 means unavailable, not a free meal.
+            price_per_person = positive_number(cost_raw)
             business_area = business.get("business_area") or poi.get("business_area") or ""
 
             poi_id = poi.get("id") or ""

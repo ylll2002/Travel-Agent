@@ -21,15 +21,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (!response.ok) {
     const body = await response.text();
-    let detail = body;
-    try {
-      const parsed: unknown = JSON.parse(body);
-      if (parsed && typeof parsed === 'object' && 'detail' in parsed) {
-        const value = (parsed as { detail: unknown }).detail;
-        if (typeof value === 'string') detail = value;
-      }
-    } catch { /* 非JSON错误保留原始文本 */ }
-    throw new Error(`请求失败 (${response.status}): ${detail}`);
+    throw new Error(`请求失败 (${response.status}): ${body}`);
   }
 
   if (response.status === 204) {
@@ -71,6 +63,8 @@ export const api = {
     start_date?: string;
     end_date?: string;
     profile?: unknown;
+    preferences?: unknown;
+    recent_trips?: unknown;
     basic?: unknown;
     modify?: unknown;
     plan?: unknown;
@@ -81,26 +75,9 @@ export const api = {
       body: JSON.stringify(payload),
       signal,
     }),
-  replan: (payload: {
-    plan: unknown;
-    revision: number;
-    plan_style: string;
-    target_block_ids: string[];
-    instruction: string;
-    profile?: unknown;
-    basic?: unknown;
-    locked_block_ids?: string[];
-  }, signal?: AbortSignal) =>
-    request<{
-      revision: number;
-      plan: Record<string, unknown>;
-      changed_block_ids: string[];
-      affected_days: number[];
-      changes: string[];
-    }>('/plan/replan', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-      signal,
+  reviewPlan: (payload: { plan: unknown; search: unknown }, signal?: AbortSignal) =>
+    request<Record<string, unknown>>('/plan/review', {
+      method: 'POST', body: JSON.stringify(payload), signal,
     }),
   chat: (messages: ChatMessage[]) =>
     request<ChatResponse>('/agent/chat', {

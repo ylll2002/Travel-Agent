@@ -1,11 +1,15 @@
-import { useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { api } from '../api/client';
 import { TripMap } from '../components/TripMap';
 import type { RouteBlock, RouteLeg } from '../components/TripMap';
 import { TripQuestions } from '../components/TripQuestions';
 import type { TripQuestion } from '../components/TripQuestions';
 import { usePlanStream } from '../hooks/usePlanStream';
+import { advanceReviewProgress, canAutoRepair, confirmationReason, currentAudit, issueTarget, reviewMessage } from '../lib/planReview';
+import CityGuide from '../components/CityGuide';
+import { PlanReviewWindow } from '../components/PlanReviewWindow';
+import type { AuditIssue, PlanAudit, ReviewContext, ReviewProgress } from '../lib/planReview';
 
 type ChatMessage = {
   id: string;
@@ -99,16 +103,19 @@ function parsePrice(value: unknown): number {
 }
 
 function knownPrice(value: unknown): number | null {
-  if (typeof value === 'boolean' || value == null) return null;
-  const text = String(value).normalize('NFKC').trim();
-  if (text === '免费' || text === '免票') return 0;
-  const match = text.match(/^(?:¥|RMB|CNY|人民币)?\s*((?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)\s*(?:元)?\s*(?:起)?\s*(?:\/(?:晚|人|份|次)|每(?:晚|人|份|次))?$/i);
-  const amount = match ? Number(match[1].replace(/,/g, '')) : NaN;
-  return Number.isFinite(amount) ? amount : null;
+  const text = String(value ?? '').trim().replace(/^(?:¥|￥|RMB|CNY)\s*/i, '').replace(/\s*元$/, '').replace(/,/g, '');
+  if (!/^\d+(?:\.\d+)?$/.test(text)) return null;
+  const number = Number(text);
+  return Number.isFinite(number) ? number : null;
 }
 
 type RoutePlan = {
   revision?: number;
+  audit?: PlanAudit | null;
+  history?: Array<Record<string, unknown>>;
+  review_pending?: boolean;
+  review_context?: ReviewContext;
+  basic?: Record<string, unknown>;
   destination: string;
   start_date: string;
   end_date: string;
@@ -121,6 +128,22 @@ type RoutePlan = {
   summaries: Record<string, string>;
   blocks: RouteBlock[];
   legs: RouteLeg[];
+  suggestions?: PlanSuggestions;
+};
+
+type SuggestionCard = {
+  name: string;
+  image: string;
+  subtitle: string;
+  link: string;
+};
+
+type PlanSuggestions = {
+  cover_image: string;
+  spots_rank: SuggestionCard[];
+  spots_match: SuggestionCard[];
+  restaurants: SuggestionCard[];
+  hotels: SuggestionCard[];
 };
 
 function getPlanDayCount(plan: RoutePlan): number {
@@ -269,6 +292,15 @@ function formatWalkingInfo(distance: number | null | undefined, duration: number
   return `步行约${Math.round(meters)}米${seconds != null ? ` / ${Math.ceil(seconds / 60)}分钟` : ''}`;
 }
 
+function formatLegSummary(leg: RouteLeg | undefined): string {
+  if (!leg?.options?.length) return '';
+  return leg.options.map((o) => {
+    const minutes = Math.max(1, Math.round(o.duration_s / 60));
+    const price = o.price != null ? ` ¥${o.price}` : '';
+    return `${o.label} ${minutes}分钟${price}`;
+  }).join(' · ');
+}
+
 function mapFood(items: unknown): FoodOption[] {
   return (Array.isArray(items) ? items : []).slice(0, 200).map((f: any, i: number) => ({
     id: `food-${i}`,
@@ -338,6 +370,13 @@ function getTripConfirmFields(data: Record<string, unknown>): TripConfirmField[]
     fields.push({
       label: '兴趣',
       value: (data.purposes as unknown[]).map(String).join('、'),
+    });
+  }
+  if (Array.isArray(data.requested_pois) && data.requested_pois.length) {
+    fields.push({
+      label: '指定景点',
+      value: (data.requested_pois as unknown[]).map(String).join('、'),
+      wide: true,
     });
   }
   if (data.food_keyword) fields.push({ label: '餐饮偏好', value: String(data.food_keyword) });
@@ -424,6 +463,9 @@ export function AgentPage() {
     instruction: string;
   } | null>(null);
   const [routePlan, setRoutePlan] = useState<RoutePlan | null>(null);
+  const [reviewLocation, setReviewLocation] = useState<ReturnType<typeof issueTarget>>(null);
+  const activityRefs = useRef(new Map<string, HTMLDivElement>());
+  const dayRefs = useRef(new Map<number, HTMLDivElement>());
   const [activeStyle, setActiveStyle] = useState('');
   const [activeDay, setActiveDay] = useState<number | 'all'>('all');
   const [expandedStyle, setExpandedStyle] = useState<string | null>(null);
@@ -443,12 +485,21 @@ export function AgentPage() {
   const [addTime, setAddTime] = useState('');
   const lastSearchRef = useRef<Record<string, unknown>>({});
   const intentVersionRef = useRef(0);
+  const planRequestVersionRef = useRef(0);
+  const committedSearchRef = useRef<Record<string, unknown>>({});
   const requestControllerRef = useRef<(AbortController & { mutation?: boolean }) | null>(null);
   const [planning, setPlanning] = useState(false);
-  const [replanning, setReplanning] = useState(false);
-  const replanControllerRef = useRef<AbortController | null>(null);
-  const currentPlanRef = useRef(routePlan);
-  currentPlanRef.current = routePlan;
+  const [generation, setGeneration] = useState<{id:number; destination:string; progress:number; status:'running'|'complete'|'stopped'} | null>(null);
+  useEffect(() => {
+    if (!planning) setGeneration(previous => previous?.status === 'running' ? {...previous, status:'stopped'} : previous);
+  }, [planning]);
+  useEffect(() => {
+    if (!planning) return;
+    const timer = window.setInterval(() => setGeneration(previous => previous?.status === 'running'
+      ? {...previous, progress:Math.max(previous.progress, Math.min(94, previous.progress + 1))} : previous), 5000);
+    return () => window.clearInterval(timer);
+  }, [planning]);
+  const [reviewProgress, setReviewProgress] = useState<ReviewProgress | null>(null);
   const [mapPosition, setMapPosition] = useState(() => {
     if (typeof window === 'undefined') return { x: 760, y: 520 };
 
@@ -465,6 +516,44 @@ export function AgentPage() {
   const mapDragRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
   const { start: startPlanStream, stop: stopPlanStream } = usePlanStream();
 
+  const confirmDisabledReason = confirmationReason(routePlan, planning, selectedBlocks.size);
+  useEffect(() => {
+    setReviewLocation(null);
+    setConfirmModalOpen(false);
+  }, [routePlan?.revision, routePlan?.audit]);
+  useEffect(() => {
+    if (!reviewLocation || expandedStyle !== reviewLocation.style) return;
+    const element = reviewLocation.ids.length
+      ? activityRefs.current.get(reviewLocation.ids[0]) : dayRefs.current.get(reviewLocation.day);
+    element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    element?.focus({ preventScroll: true });
+  }, [reviewLocation, expandedStyle]);
+
+  function locateReviewIssue(issue: AuditIssue) {
+    if (!routePlan || planning) return;
+    const target = issueTarget(issue, routePlan.blocks);
+    if (!target) return;
+    setActiveStyle(target.style);
+    setExpandedStyle(target.style);
+    setActiveDay(target.day);
+    setReviewLocation(target);
+  }
+
+  async function retryReview() {
+    if (!routePlan || planning || !routePlan.revision) return;
+    const snapshot = routePlan;
+    setSelectedBlocks(new Set());
+    const version = ++planRequestVersionRef.current;
+    setPlanning(true);
+    addAssistantMessage('正在审核当前行程，发现可修复的问题时将自动调整…');
+    try {
+      const audit = await repairCurrentSnapshot(snapshot, committedSearchRef.current, version);
+      if (version === planRequestVersionRef.current) updateLastAssistantMessage(reviewMessage(audit));
+    } finally {
+      if (version === planRequestVersionRef.current) setPlanning(false);
+    }
+  }
+
   const styleBlocks = useMemo(
     () => routePlan?.blocks.filter((b) => b.plan_style === activeStyle) ?? [],
     [routePlan, activeStyle],
@@ -472,6 +561,10 @@ export function AgentPage() {
   const styleLegs = useMemo(
     () => routePlan?.legs.filter((leg) => leg.plan_style === activeStyle) ?? [],
     [routePlan, activeStyle],
+  );
+  const expandedLegs = useMemo(
+    () => routePlan?.legs.filter((leg) => leg.plan_style === expandedStyle) ?? [],
+    [routePlan, expandedStyle],
   );
   const planDays = useMemo(
     () => Array.from(new Set(styleBlocks.map((b) => b.day))).sort((a, b) => a - b),
@@ -584,7 +677,7 @@ export function AgentPage() {
     const hotels = mapHotels(searchData.hotels);
     const spots = mapSpots(searchData.poi);
     const events = mapEvents(searchData.events);
-    const food = mapFood(searchData.food);
+    const food = mapFood(searchData.food_preview ?? searchData.food);
     setSocialFood(Array.isArray(searchData.social_food) ? searchData.social_food : []);
     setOptions([...flights, ...trains, ...hotels, ...spots, ...events, ...food]);
     if (flights.length + trains.length === 0) {
@@ -595,169 +688,181 @@ export function AgentPage() {
     }
   }
 
+  function publishPlanSnapshot(raw: Record<string, unknown>, pending: boolean): RoutePlan | null {
+    const plan = (raw.plan ?? raw) as Record<string, unknown>;
+    if (!Array.isArray(plan.blocks) || plan.error || !Number.isSafeInteger(plan.revision) || Number(plan.revision) < 1) return null;
+    const plans = Array.isArray(plan.plans) ? plan.plans as Array<{style:string;summary?:string}> : [];
+    const styles = plans.map(p => p.style).filter(Boolean);
+    const snapshot: RoutePlan = {
+      revision: typeof plan.revision === 'number' ? plan.revision : undefined,
+      audit: pending ? null : currentAudit(raw.audit ?? plan.audit, plan.revision), review_pending: pending,
+      history: Array.isArray(raw.history) ? raw.history as Array<Record<string, unknown>> : [],
+      review_context: raw.review_context as ReviewContext | undefined ?? routePlan?.review_context,
+      basic: plan.basic as Record<string,unknown> | undefined ?? routePlan?.basic,
+      destination: String(plan.destination ?? routePlan?.destination ?? ''),
+      start_date: String(plan.start_date ?? routePlan?.start_date ?? ''),
+      end_date: String(plan.end_date ?? routePlan?.end_date ?? ''),
+      styles: styles.length ? styles : routePlan?.styles ?? [],
+      summaries: plans.length ? Object.fromEntries(plans.map(p => [p.style, p.summary ?? ''])) : routePlan?.summaries ?? {},
+      blocks: plan.blocks as RouteBlock[], legs: Array.isArray(plan.legs) ? plan.legs as RouteLeg[] : [],
+      total_cost: plan.total_cost as number | undefined, budget_status: plan.budget_status as string | undefined,
+      cost_by_style: plan.cost_by_style as RoutePlan['cost_by_style'], budget_by_style: plan.budget_by_style as RoutePlan['budget_by_style'],
+      unpriced_items: plan.unpriced_items as RoutePlan['unpriced_items'], suggestions: plan.suggestions as PlanSuggestions | undefined,
+    };
+    setRoutePlan(snapshot);
+    setConfirmedStyle(null);
+    setSaveState('idle');
+    if (raw.search && typeof raw.search === 'object') {
+      committedSearchRef.current = raw.search as Record<string,unknown>;
+      applySearchData(committedSearchRef.current);
+    }
+    return snapshot;
+  }
+
+  function receiveWorkflowEvent(data: Record<string, unknown>) {
+    setReviewProgress(previous => advanceReviewProgress(previous, data));
+    if (data.plan) {
+      const snapshot = publishPlanSnapshot(data, data.stage === 'reviewing');
+      if (snapshot) setActiveStyle(previous => snapshot.styles.includes(previous) ? previous : snapshot.styles[0] ?? '');
+    }
+    else if (data.search) applySearchData(data.search as Record<string,unknown>);
+  }
+
+  function workflowFailed(error: string) {
+    setReviewProgress(previous => advanceReviewProgress(previous, {stage:'error',error}));
+    setRoutePlan(previous => previous ? {...previous, review_pending:false, audit:{
+      schema_version:1,plan_revision:previous.revision!,status:'error',passed:false,error,
+      issues:previous.audit?.issues.filter(issue => issue.source === 'rule') ?? [],
+      rule_summary:previous.audit?.rule_summary,
+    }} : previous);
+  }
+
+  async function repairCurrentSnapshot(snapshot: RoutePlan, search: Record<string, unknown>, version: number): Promise<PlanAudit | null> {
+    let finalAudit: PlanAudit | null = null;
+    setRoutePlan({...snapshot, audit:null, review_pending:true});
+    setReviewProgress(advanceReviewProgress(null, {stage:'reviewing',repair_count:0,plan:snapshot}));
+    await startPlanStream({plan:snapshot,search}, event => {
+      if (version !== planRequestVersionRef.current) return;
+      if (event.type === 'node') receiveWorkflowEvent(event.data);
+      else if (event.type === 'error') workflowFailed(event.error);
+      else {
+        const raw = event.data;
+        if (typeof raw.error === 'string') {workflowFailed(raw.error); return;}
+        const current = publishPlanSnapshot(raw, false);
+        finalAudit = current?.audit ?? null;
+        if (!finalAudit) { workflowFailed('当前版本没有有效审核结论，请重试。'); return; }
+        const workflow = raw.workflow as Record<string,unknown> | undefined;
+        setReviewProgress(previous => advanceReviewProgress(previous, {stage:finalAudit?.status ?? 'error',
+          plan:current,audit:finalAudit,...workflow,repair_count:workflow?.repair_count}));
+      }
+    }, '/plan/repair/stream');
+    return finalAudit;
+  }
+
   async function runPlan(payload: Record<string, unknown>) {
+    const version = ++planRequestVersionRef.current;
+    setGeneration({id:version, destination:String(payload.destination ?? ''), progress:5, status:'running'});
     setPlanning(true);
-    await startPlanStream(
-      payload,
-      (event) => {
-        if (event.type === 'node') {
-          const nodeData = event.data as { node?: unknown; search?: unknown };
-          const node = String(nodeData.node ?? '');
-          if (node === 'search' && nodeData.search) {
-            applySearchData(nodeData.search as Record<string, unknown>);
-          }
-          const status =
-            node === 'search'
-              ? '已找到机票、酒店、景点、活动等信息，正在生成方案…'
-              : node === 'prepare_memory'
-                ? '正在读取你的偏好和历史行程…'
-              : node === 'plan'
-                ? '正在安排景点，并搜索餐点附近的餐厅…'
-                : node === 'validate'
-                  ? '正在审核方案…'
-                  : '正在处理…';
-          updateLastAssistantMessage(status);
-          return;
-        }
-
-        if (event.type === 'error') {
-          updateLastAssistantMessage(`规划失败：${event.error}`);
-          return;
-        }
-
-        const raw = event.data ?? {};
-        const plan = (raw.plan ?? {}) as {
-          destination?: string;
-          start_date?: string;
-          end_date?: string;
-          plans?: Array<{ style?: string; summary?: string }>;
-          blocks?: RouteBlock[];
-          legs?: RouteLeg[];
-          total_cost?: number;
-          budget_status?: string;
-          cost_by_style?: Record<string, number>;
-          budget_by_style?: Record<string, string>;
-          unpriced_items?: Record<string, string[]>;
-          food_warnings?: string[];
-          warnings?: string[];
-          error?: string;
-        };
-        if (plan.error) {
-          updateLastAssistantMessage(`规划失败：${plan.error}`);
-          return;
-        }
-
-        const styles = (plan.plans ?? []).map((p) => p.style ?? '').filter(Boolean);
-        const summaries: Record<string, string> = {};
-        for (const p of plan.plans ?? []) {
-          if (p.style) summaries[p.style] = p.summary ?? '';
-        }
-        const blocks = plan.blocks ?? [];
-        const legs = plan.legs ?? [];
-        setRoutePlan({
-          destination: plan.destination ?? '',
-          start_date: plan.start_date ?? '',
-          end_date: plan.end_date ?? '',
-          styles,
-          summaries,
-          blocks,
-          legs,
-          total_cost: plan.total_cost,
-          budget_status: plan.budget_status,
-          cost_by_style: plan.cost_by_style,
-          budget_by_style: plan.budget_by_style,
-          unpriced_items: plan.unpriced_items,
-        });
-        setActiveStyle(styles[0] ?? '');
-        setActiveDay('all');
-        setExpandedStyle(null);
-        setConfirmedStyle(null);
-        setPlanRating(null);
-        setPlanFeedback('');
-        setSaveState('idle');
-        setSelectedBlocks(new Set());
-
-        applySearchData((raw.search ?? {}) as Record<string, unknown>);
-        setPlanItemIds([]);
-        setDetailItem(null);
-
-        const located = blocks.filter((b) => b.lng != null).length;
-        const audit = raw.audit as { passed?: boolean; error?: string; issues?: Array<{ detail?: string }> } | undefined;
-        const review = audit?.error ? '审核暂未完成，可继续查看和调整行程。'
-          : audit?.passed === false ? `审核提示：${(audit.issues ?? []).slice(0, 3).map((issue) => issue.detail).filter(Boolean).join('；') || '建议进一步检查行程安排。'}`
-          : audit?.issues?.length ? `审核建议：${audit.issues.slice(0, 3).map((issue) => issue.detail).filter(Boolean).join('；')}` : '';
-        const message = legs.length > 0
-            ? `已为「${plan.destination}」生成 ${styles.length} 个方案，右上地图展示了 ${located} 个地点和 ${legs.length} 段真实路线。`
-            : `已为「${plan.destination}」生成行程。地图显示已定位地点，暂未获取到详细交通路线。`;
-        updateLastAssistantMessage([message, review, ...(plan.warnings ?? []).slice(0, 3), ...(plan.food_warnings ?? []).slice(0, 2)].filter(Boolean).join('\n'));
-      },
-    );
-
-    setPlanning(false);
+    setReviewProgress(advanceReviewProgress(null, {stage:'planning',repair_count:0}));
+    setRoutePlan(previous => previous ? {...previous,audit:null,review_pending:true} : previous);
+    setExpandedStyle(null);
+    setSelectedBlocks(new Set());
+    await startPlanStream(payload, event => {
+      if (version !== planRequestVersionRef.current) return;
+      if (event.type === 'node') {
+        const data = event.data;
+        const target = data.node === 'search' ? 35 : data.stage === 'reviewing' ? 65 + Number(data.repair_count ?? 0) * 10
+          : data.stage === 'repairing' ? 70 + Number(data.repair_count ?? 0) * 10 : 5;
+        setGeneration(previous => previous ? {...previous, progress:Math.max(previous.progress, Math.min(95, target))} : previous);
+        receiveWorkflowEvent(data); return;
+      }
+      if (event.type === 'error') {
+        workflowFailed(event.error);
+        updateLastAssistantMessage('本次处理未完成，现有行程已保留，请查看审核窗口。');
+        return;
+      }
+      const raw = event.data;
+      const plan = (raw.plan ?? {}) as Record<string,unknown>;
+      if (typeof raw.error === 'string' || typeof plan.error === 'string') {
+        workflowFailed(String(raw.error ?? plan.error));
+        updateLastAssistantMessage('本次处理未完成，请查看审核窗口后重试。');
+        return;
+      }
+      const snapshot = publishPlanSnapshot(raw,false);
+      if (!snapshot || !snapshot.audit) {workflowFailed('未收到完整行程和有效审核结论，请重试。'); return;}
+      setGeneration(previous => previous ? {...previous, progress:100, status:'complete'} : previous);
+      const workflow = raw.workflow as Record<string,unknown> | undefined;
+      setReviewProgress(previous => advanceReviewProgress(previous, {stage:snapshot.audit?.status ?? 'error',plan:snapshot,
+        audit:snapshot.audit,...workflow,repair_count:workflow?.repair_count}));
+      setActiveStyle(snapshot.styles[0] ?? '');
+      setActiveDay('all');
+      setPlanRating(null);
+      setPlanFeedback('');
+      setPlanItemIds([]);
+      setDetailItem(null);
+      const located = snapshot.blocks.filter(b => b.lng != null).length;
+      updateLastAssistantMessage(`已为「${snapshot.destination}」生成 ${snapshot.styles.length} 个方案，地图展示了 ${located} 个地点和 ${snapshot.legs.length} 段路线。\n${reviewMessage(snapshot.audit ?? null)}`);
+    }).finally(() => {
+      if (version === planRequestVersionRef.current) setPlanning(false);
+    });
   }
 
   async function mutatePlan(change: Record<string, unknown>, successMessage: string): Promise<boolean> {
     if (!routePlan || planning || (requestControllerRef.current?.mutation && !requestControllerRef.current.signal.aborted)) return false;
     const controller: AbortController & { mutation?: boolean } = new AbortController();
     controller.mutation = true;
+    const version = ++planRequestVersionRef.current;
     requestControllerRef.current = controller;
+    setRoutePlan((prev) => prev ? { ...prev, review_pending: true } : prev);
     setPlanning(true);
+    setReviewProgress(advanceReviewProgress(null, {stage:'planning'}));
     try {
       const userId = localStorage.getItem('currentUser') || '';
       let profile: unknown = null;
-      let basic: unknown = null;
+      let basic: unknown = routePlan.basic ?? null;
       try {
         profile = JSON.parse(localStorage.getItem('userProfile') || 'null');
       } catch {
         profile = null;
       }
       try {
-        basic = JSON.parse(localStorage.getItem('tripInfo') || 'null');
+        if (!basic) basic = JSON.parse(localStorage.getItem('tripInfo') || 'null');
       } catch {
-        basic = null;
+        basic = routePlan.basic ?? null;
       }
+      profile = profile ?? routePlan.review_context?.profile;
       const raw = await api.plan({
         destination: routePlan.destination,
         start_date: routePlan.start_date,
         end_date: routePlan.end_date,
         ...(userId ? { user_id: userId } : {}),
         ...(profile ? { profile } : {}),
+        preferences: routePlan.review_context?.preferences,
+        recent_trips: routePlan.review_context?.recent_trips,
         ...(basic ? { basic } : {}),
         plan: routePlan,
-        search: lastSearchRef.current,
+        search: committedSearchRef.current,
         modify: {
           blocks: routePlan.blocks,
           plan_style: expandedStyle || activeStyle || routePlan.styles[0],
           ...change,
         },
       }, controller.signal);
-      if (controller.signal.aborted || requestControllerRef.current !== controller) return false;
+      if (controller.signal.aborted || requestControllerRef.current !== controller || version !== planRequestVersionRef.current) return false;
       if (typeof raw.error === 'string') {
         throw new Error(raw.error);
       }
       if (!Array.isArray(raw.blocks)) throw new Error('没有收到更新后的计划，请重试。');
-      const newBlocks = raw.blocks as RouteBlock[];
-      const plans = Array.isArray(raw.plans) ? raw.plans as Array<{ style: string; summary: string }> : [];
-      const styles = plans.map((item) => item.style).filter(Boolean);
-      setRoutePlan((prev) => prev ? {
-        ...prev,
-        destination: String(raw.destination ?? prev.destination),
-        start_date: String(raw.start_date ?? prev.start_date),
-        end_date: String(raw.end_date ?? prev.end_date),
-        blocks: newBlocks,
-        legs: Array.isArray(raw.legs) ? raw.legs as RouteLeg[] : [],
-        ...(styles.length ? { styles, summaries: Object.fromEntries(plans.map((item) => [item.style, item.summary])) } : {}),
-        total_cost: typeof raw.total_cost === 'number' ? raw.total_cost : prev.total_cost,
-        budget_status: String(raw.budget_status ?? prev.budget_status ?? ''),
-        cost_by_style: raw.cost_by_style as RoutePlan['cost_by_style'] ?? prev.cost_by_style,
-        budget_by_style: raw.budget_by_style as RoutePlan['budget_by_style'] ?? prev.budget_by_style,
-        unpriced_items: raw.unpriced_items as RoutePlan['unpriced_items'] ?? prev.unpriced_items,
-      } : prev);
-      const updatedSearch = raw.search && typeof raw.search === 'object' ? raw.search as Record<string, unknown> : lastSearchRef.current;
-      applySearchData({ ...updatedSearch,
+      let audit = currentAudit(raw.audit, raw.revision);
+      const editedSnapshot = publishPlanSnapshot(raw, false);
+      if (!editedSnapshot) throw new Error('没有收到完整的新行程，请重试。');
+      setReviewProgress(advanceReviewProgress(null, {stage:audit?.status ?? 'error',plan:editedSnapshot,audit}));
+      const updatedSearch = raw.search && typeof raw.search === 'object' ? raw.search as Record<string, unknown> : committedSearchRef.current;
+      committedSearchRef.current = { ...updatedSearch,
         ...(Array.isArray(raw.food) ? { food: raw.food } : {}),
         ...(Array.isArray(raw.food_by_anchor) ? { food_by_anchor: raw.food_by_anchor } : {}),
-      });
+      };
+      applySearchData(committedSearchRef.current);
       if (raw.basic && typeof raw.basic === 'object') {
         localStorage.setItem('tripInfo', JSON.stringify(raw.basic));
         setTripData({ ...raw.basic as Record<string, unknown>,
@@ -769,17 +874,22 @@ export function AgentPage() {
       setSelectedBlocks(new Set());
       setConfirmedStyle(null);
       setSaveState('idle');
-      const timingWarnings = Array.isArray(raw.travel_time_warnings) ? raw.travel_time_warnings.filter((item): item is string => typeof item === 'string') : [];
-      updateLastAssistantMessage([successMessage, ...timingWarnings.slice(0, 3)].join('\n'));
+      if (canAutoRepair(audit)) {
+        audit = await repairCurrentSnapshot(editedSnapshot, committedSearchRef.current, version);
+        if (controller.signal.aborted || version !== planRequestVersionRef.current) return false;
+      }
+      updateLastAssistantMessage([successMessage, reviewMessage(audit)].join('\n'));
       return true;
     } catch (error) {
-      if ((error as Error).name === 'AbortError' || controller.signal.aborted || requestControllerRef.current !== controller) return false;
+      if ((error as Error).name === 'AbortError' || controller.signal.aborted || requestControllerRef.current !== controller || version !== planRequestVersionRef.current) return false;
+      workflowFailed(error instanceof Error ? error.message : String(error));
       updateLastAssistantMessage(
         `修改失败：${error instanceof Error ? error.message : String(error)}`,
       );
       return false;
     } finally {
-      if (requestControllerRef.current === controller) {
+      if (requestControllerRef.current === controller && version === planRequestVersionRef.current) {
+        setRoutePlan((prev) => prev ? { ...prev, review_pending: false } : prev);
         requestControllerRef.current = null;
         setPlanning(false);
       }
@@ -794,94 +904,6 @@ export function AgentPage() {
       ...(ids.length ? { block_ids: ids } : {}),
       ...(targets ? { targets } : {}),
     }, '已按你的需求更新计划，餐饮和地图路线也已同步。');
-  }
-
-
-  async function replanSelected(instruction: string) {
-    const snapshot = routePlan;
-    const style = expandedStyle || activeStyle;
-    if (!snapshot || !style || selectedBlocks.size === 0 || replanControllerRef.current) return;
-    const targets = snapshot.blocks.filter((block) => selectedBlocks.has(block.id) && block.plan_style === style);
-    if (!targets.length) return;
-    clearComposer();
-    setMessages((prev) => [...prev, { id: buildId(), role: 'user', content: instruction }]);
-    const pendingMeals = snapshot.blocks.filter((block) =>
-      block.plan_style === style && block.note === '餐饮推荐' && !selectedBlocks.has(block.id));
-    if (pendingMeals.length) {
-      addAssistantMessage('请先为' + pendingMeals.map((block) => '第' + block.day + '天的' + block.name).join('、') + '选择具体餐厅，再重新规划。原因已保留在聊天记录中。');
-      return;
-    }
-    const controller = new AbortController();
-    replanControllerRef.current = controller;
-    requestControllerRef.current = controller;
-    setReplanning(true);
-    setPlanning(true);
-    addAssistantMessage('正在重新规划「' + targets.map((block) => block.name).join('、') + '」，并检查后续安排…');
-    try {
-      let profile: unknown = null;
-      let basic: unknown = null;
-      try { profile = JSON.parse(localStorage.getItem('userProfile') || 'null'); } catch { /* 空画像 */ }
-      try { basic = JSON.parse(localStorage.getItem('tripInfo') || 'null'); } catch { /* 空旅行信息 */ }
-      const result = await api.replan({
-        plan: snapshot,
-        revision: snapshot.revision ?? 0,
-        plan_style: style,
-        target_block_ids: targets.map((block) => block.id),
-        instruction,
-        ...(profile ? { profile } : {}),
-        ...(basic ? { basic } : {}),
-        locked_block_ids: snapshot.blocks.filter((block) => block.locked).map((block) => block.id),
-      }, controller.signal);
-      if (controller.signal.aborted || requestControllerRef.current !== controller) return;
-      if (currentPlanRef.current !== snapshot) {
-        updateLastAssistantMessage('方案已变化，本次重新规划结果未应用，请重新选择活动。');
-        return;
-      }
-      const plan = result.plan;
-      if (!Array.isArray(plan.blocks) || !Array.isArray(plan.legs)
-        || !Array.isArray(result.changes) || !result.changes.every((change) => typeof change === 'string')
-        || result.revision !== (snapshot.revision ?? 0) + 1) {
-        throw new Error('返回的方案不完整，原方案已保留');
-      }
-      setRoutePlan({
-        ...snapshot,
-        blocks: plan.blocks as RouteBlock[],
-        legs: plan.legs as RouteLeg[],
-        revision: result.revision,
-        total_cost: typeof plan.total_cost === 'number' ? plan.total_cost : undefined,
-        budget_status: String(plan.budget_status ?? 'unknown'),
-        cost_by_style: plan.cost_by_style as RoutePlan['cost_by_style'],
-        budget_by_style: plan.budget_by_style as RoutePlan['budget_by_style'],
-        unpriced_items: plan.unpriced_items as RoutePlan['unpriced_items'],
-      });
-      applySearchData({ ...lastSearchRef.current,
-        ...(Array.isArray(plan.food) ? { food: plan.food } : {}),
-        ...(Array.isArray(plan.food_by_anchor) ? { food_by_anchor: plan.food_by_anchor } : {}) });
-      setSelectedBlocks(new Set());
-      setConfirmedStyle(null);
-      setConfirmModalOpen(false);
-      setPlanRating(null);
-      setPlanFeedback('');
-      setSaveState('idle');
-      setPendingConfirm(null);
-      updateLastAssistantMessage('重新规划完成：\n' + result.changes.join('\n'));
-      const userId = localStorage.getItem('currentUser');
-      if (userId) targets.forEach((block) => {
-        void api.reportBehavior(userId, 'remove', block.name, instruction).catch(() => {});
-        const next = (plan.blocks as RouteBlock[]).find((item) => item.id === block.id);
-        if (next) void api.reportBehavior(userId, 'add', next.name, instruction).catch(() => {});
-      });
-    } catch (error) {
-      if (controller.signal.aborted || requestControllerRef.current !== controller) return;
-      updateLastAssistantMessage('重新规划失败：' + (error instanceof Error ? error.message : String(error)) + '。原方案已保留，原因可在聊天记录中查看。');
-    } finally {
-      if (replanControllerRef.current === controller) replanControllerRef.current = null;
-      if (requestControllerRef.current === controller) {
-        requestControllerRef.current = null;
-        setReplanning(false);
-        setPlanning(false);
-      }
-    }
   }
 
   async function startTripPlan(data: Record<string, unknown>) {
@@ -1056,292 +1078,10 @@ export function AgentPage() {
   }
 
 
-  function loadMockData() {
-    if (planning) return;
-    const styles = ['轻享周末', '深度漫游'];
-    const summaries: Record<string, string> = {
-      轻享周末: '杭州 2 日轻松游，西湖、灵隐寺与河坊街，节奏舒缓、适合周末放松。',
-      深度漫游: '杭州 2 日文化深度游，博物馆、古迹与老街区，安排更紧凑。',
-    };
-    const blocks: RouteBlock[] = [
-      {
-        id: 'mock-a-1',
-        plan_style: '轻享周末',
-        day: 1,
-        date: '2026-10-02',
-        type: '景点',
-        time: '09:00-11:00',
-        name: '西湖风景名胜区',
-        note: '地铁1号线到龙翔桥，步行至断桥',
-        lng: 120.1475,
-        lat: 30.2444,
-      },
-      {
-        id: 'mock-a-2',
-        plan_style: '轻享周末',
-        day: 1,
-        date: '2026-10-02',
-        type: '美食',
-        time: '12:00-13:00',
-        name: '楼外楼（孤山路店）',
-        note: '西湖醋鱼、龙井虾仁',
-        lng: 120.1324,
-        lat: 30.2506,
-      },
-      {
-        id: 'mock-a-3',
-        plan_style: '轻享周末',
-        day: 2,
-        date: '2026-10-03',
-        type: '景点',
-        time: '10:00-12:00',
-        name: '灵隐寺',
-        note: '打车约 25 分钟',
-        lng: 120.0996,
-        lat: 30.2378,
-      },
-      {
-        id: 'mock-a-4',
-        plan_style: '轻享周末',
-        day: 2,
-        date: '2026-10-03',
-        type: '酒店',
-        time: '14:00',
-        name: '杭州西子湖四季酒店',
-        note: '湖景房，含双早',
-        lng: 120.1512,
-        lat: 30.2312,
-      },
-      {
-        id: 'mock-b-1',
-        plan_style: '深度漫游',
-        day: 1,
-        date: '2026-10-02',
-        type: '景点',
-        time: '09:30-11:30',
-        name: '浙江省博物馆',
-        note: '地铁2号线到武林门',
-        lng: 120.1537,
-        lat: 30.2666,
-      },
-      {
-        id: 'mock-b-2',
-        plan_style: '深度漫游',
-        day: 1,
-        date: '2026-10-02',
-        type: '美食',
-        time: '12:30-13:30',
-        name: '知味观（仁和路店）',
-        note: '小笼包、猫耳朵',
-        lng: 120.1661,
-        lat: 30.2461,
-      },
-      {
-        id: 'mock-b-3',
-        plan_style: '深度漫游',
-        day: 2,
-        date: '2026-10-03',
-        type: '景点',
-        time: '10:00-12:00',
-        name: '河坊街与南宋御街',
-        note: '地铁1号线到定安路',
-        lng: 120.1706,
-        lat: 30.2417,
-      },
-      {
-        id: 'mock-b-4',
-        plan_style: '深度漫游',
-        day: 2,
-        date: '2026-10-03',
-        type: '酒店',
-        time: '14:00',
-        name: '杭州西湖国宾馆',
-        note: '园林式酒店，安静',
-        lng: 120.1213,
-        lat: 30.2268,
-      },
-    ];
-    const legs: RouteLeg[] = [
-      {
-        plan_style: '轻享周末',
-        day: 1,
-        from: 'mock-a-1',
-        to: 'mock-a-2',
-        mode: 'walk',
-        distance_m: 1300,
-        duration_s: 1080,
-        polyline: [
-          [120.1475, 30.2444],
-          [120.1402, 30.2476],
-          [120.1324, 30.2506],
-        ],
-      },
-      {
-        plan_style: '轻享周末',
-        day: 2,
-        from: 'mock-a-3',
-        to: 'mock-a-4',
-        mode: 'drive',
-        distance_m: 6200,
-        duration_s: 1380,
-        polyline: [
-          [120.0996, 30.2378],
-          [120.1234, 30.2312],
-          [120.1512, 30.2312],
-        ],
-      },
-      {
-        plan_style: '深度漫游',
-        day: 1,
-        from: 'mock-b-1',
-        to: 'mock-b-2',
-        mode: 'transit',
-        distance_m: 2400,
-        duration_s: 1500,
-        lines: ['地铁1号线'],
-        polyline: [
-          [120.1537, 30.2666],
-          [120.1598, 30.2563],
-          [120.1661, 30.2461],
-        ],
-      },
-    ];
-
-    setRoutePlan({
-      destination: '杭州',
-      start_date: '2026-10-02',
-      end_date: '2026-10-03',
-      styles,
-      summaries,
-      blocks,
-      legs,
-    });
-    setWeatherData({
-      days: [
-        {
-          date: '2026-10-02',
-          weather: '多云',
-          temp_min: 20,
-          temp_max: 27,
-          humidity: 68,
-        },
-        {
-          date: '2026-10-03',
-          weather: '晴',
-          temp_min: 21,
-          temp_max: 29,
-          humidity: 62,
-        },
-      ],
-    });
-    setOptions([
-      {
-        id: 'mock-flight-1',
-        type: 'flight',
-        mode: 'flight',
-        title: 'MU5211',
-        subtitle: '上海虹桥 → 杭州',
-        from: '上海虹桥',
-        to: '杭州',
-        departTime: '08:30',
-        arriveTime: '09:20',
-        carrier: '东方航空',
-        code: 'MU5211',
-        duration: '50分钟',
-        price: 420,
-        scheduleAt: '08:30',
-        scheduleLabel: '08:30',
-        location: '杭州',
-        tags: ['经济舱'],
-        description: '东方航空 MU5211，上海虹桥 → 杭州。',
-      },
-      {
-        id: 'mock-hotel-1',
-        type: 'hotel',
-        title: '杭州西子湖四季酒店',
-        subtitle: '西湖区',
-        district: '西湖区',
-        checkIn: '2026-10-02',
-        checkOut: '2026-10-03',
-        roomType: '豪华湖景房',
-        rating: 4.8,
-        nightlyPrice: 1280,
-        totalPrice: 1280,
-        scheduleAt: '',
-        scheduleLabel: '',
-        location: '西湖区',
-        tags: ['五星'],
-        description: '杭州西子湖四季酒店，五星，西湖区。',
-      },
-      {
-        id: 'mock-spot-1',
-        type: 'spot',
-        title: '西湖风景名胜区',
-        subtitle: '自然风光',
-        area: '西湖区',
-        openHours: '全天',
-        recommendedDuration: '3小时',
-        ticketPrice: 0,
-        scheduleAt: '',
-        scheduleLabel: '',
-        location: '西湖区',
-        tags: ['5A'],
-        description: '杭州经典自然风光，免费开放。',
-      },
-      {
-        id: 'mock-event-1',
-        type: 'event',
-        title: '西湖音乐节',
-        subtitle: '现场演出',
-        price: 188,
-        scheduleAt: '2026-10-02',
-        scheduleLabel: '10月2日',
-        location: '西湖',
-        tags: ['音乐节'],
-        description: '西湖音乐节，现场演出。',
-      },
-      {
-        id: 'mock-food-1',
-        type: 'food',
-        title: '楼外楼（孤山路店）',
-        subtitle: '杭帮菜',
-        cuisine: '杭帮菜',
-        rating: 4.6,
-        pricePerPerson: 120,
-        businessArea: '西湖',
-        address: '杭州市西湖区孤山路30号',
-        detailUrl: '',
-        mapUrl: '',
-        scheduleAt: '',
-        scheduleLabel: '',
-        location: '西湖',
-        tags: ['杭帮菜', '4.6分'],
-        description: '杭州市西湖区孤山路30号',
-      },
-    ]);
-    setActiveStyle(styles[0] ?? '');
-    setActiveDay('all');
-    setExpandedStyle(null);
-    setConfirmedStyle(null);
-    setPlanRating(null);
-    setPlanFeedback('');
-    setSaveState('idle');
-    setSelectedBlocks(new Set());
-    addAssistantMessage('已加载前端测试数据，可在右侧「方案」中查看两个示例计划。');
-  }
 
   function handleSend() {
     const content = draft.trim();
     if (!content || planning) return;
-    if (routePlan && !collectingTrip && !tripConfirm && selectedBlocks.size > 0) {
-      void replanSelected(content);
-      return;
-    }
-
-    if (selectedBlocks.size > 0) {
-      void replanSelected(content);
-      return;
-    }
 
     if (pendingAdd) {
       setMessages((prev) => [
@@ -1376,12 +1116,12 @@ export function AgentPage() {
 
   function stopPlanning() {
     intentVersionRef.current += 1;
-    replanControllerRef.current?.abort();
-    replanControllerRef.current = null;
-    setReplanning(false);
+    planRequestVersionRef.current += 1;
+    setRoutePlan((prev) => prev ? { ...prev, review_pending: false } : prev);
     requestControllerRef.current?.abort();
     stopPlanStream();
     setPlanning(false);
+    setReviewProgress(previous => advanceReviewProgress(previous, {stage:'cancelled'}));
     addAssistantMessage('已停止本次处理。你可以继续补充或调整需求。');
   }
 
@@ -1475,10 +1215,6 @@ export function AgentPage() {
 
   function toggleBlock(blockId: string) {
     if (planning) return;
-    const block = routePlan?.blocks.find((item) => item.id === blockId);
-    if (!block || block.type === '天气' || collectingTrip || tripConfirm) return;
-    setPendingAdd(null);
-    setPendingConfirm(null);
     setSelectedBlocks((prev) => {
       const next = new Set(prev);
       if (next.has(blockId)) {
@@ -1504,7 +1240,6 @@ export function AgentPage() {
   }
 
   function chooseStyle(style: string) {
-    if (planning) return;
     setActiveStyle(style);
     setExpandedStyle(style);
     setActiveDay('all');
@@ -1523,7 +1258,7 @@ export function AgentPage() {
   }
 
   function confirmPlan() {
-    if (!expandedStyle || !routePlan || planning || selectedBlocks.size > 0) return;
+    if (!expandedStyle || !routePlan || confirmDisabledReason) return;
     setPlanRating(null);
     setPlanFeedback('');
     setSaveState('idle');
@@ -1535,13 +1270,14 @@ export function AgentPage() {
   }
 
   async function acceptPlan() {
-    if (!expandedStyle || !routePlan) return;
+    if (!expandedStyle || !routePlan || confirmDisabledReason || saveState === 'saving') return;
     const userId = localStorage.getItem('currentUser') || '';
     if (!userId) {
       setSaveState('error');
       setConfirmModalOpen(false);
       return;
     }
+    const savedRequestVersion = planRequestVersionRef.current;
     setSaveState('saving');
     try {
       const payload: Parameters<typeof api.saveTripMemory>[0] = {
@@ -1556,6 +1292,7 @@ export function AgentPage() {
       if (planRating != null) payload.rating = planRating;
       if (planFeedback.trim()) payload.feedback = planFeedback.trim();
       await api.saveTripMemory(payload);
+      if (savedRequestVersion !== planRequestVersionRef.current) return;
       setConfirmedStyle(expandedStyle);
       setSaveState('saved');
       setConfirmModalOpen(false);
@@ -1564,7 +1301,7 @@ export function AgentPage() {
         void api.reportBehavior(userId, 'rate', expandedStyle, String(planRating));
       }
     } catch {
-      setSaveState('error');
+      if (savedRequestVersion === planRequestVersionRef.current) setSaveState('error');
     }
   }
 
@@ -1777,6 +1514,47 @@ export function AgentPage() {
                 </div>
               );
             })}
+            {routePlan?.suggestions && (() => {
+              const cards = [
+                ...routePlan.suggestions.spots_rank.map((card) => ({ ...card, kind: '景点' })),
+                ...routePlan.suggestions.spots_match.map((card) => ({ ...card, kind: '景点' })),
+                ...routePlan.suggestions.restaurants.map((card) => ({ ...card, kind: '餐厅' })),
+                ...routePlan.suggestions.hotels.map((card) => ({ ...card, kind: '酒店' })),
+              ];
+              return cards.length > 0 ? (
+                <div className="ta-message assistant">
+                  <span className="ta-message-avatar">TR</span>
+                  <div className="ta-message-bubble ta-suggestion-bubble">
+                    <div className="ta-suggestion-scroll">
+                      {cards.map((card) => (
+                        <a
+                          key={`${card.kind}-${card.name}`}
+                          className="ta-suggestion-card"
+                          href={card.link || undefined}
+                          target={card.link ? '_blank' : undefined}
+                          rel="noreferrer"
+                        >
+                          <span className="ta-suggestion-kind">{card.kind}</span>
+                          {card.image && (
+                            <img
+                              className="ta-suggestion-card-img"
+                              src={card.image}
+                              alt={card.name}
+                            />
+                          )}
+                          <div className="ta-suggestion-card-body">
+                            <strong>{card.name}</strong>
+                            <span>{card.subtitle}</span>
+                          </div>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : null;
+            })()}
+            {generation && <CityGuide key={generation.id} destination={generation.destination}
+              progress={generation.progress} status={generation.status} />}
           </div>
 
           {question && (
@@ -1844,8 +1622,7 @@ export function AgentPage() {
                 resizeComposer(event.currentTarget);
               }}
               onKeyDown={handleComposerKeyDown}
-              placeholder={selectedBlocks.size > 0 ? '重新规划的原因...' : '描述你的旅行想法，或继续补充信息…'}
-              disabled={replanning}
+              placeholder="描述你的旅行想法，或继续补充信息…"
               rows={1}
             />
             {planning ? (
@@ -1863,7 +1640,7 @@ export function AgentPage() {
                 onClick={handleSend}
                 disabled={!draft.trim()}
               >
-                {selectedBlocks.size > 0 ? '重新规划' : '发送'}
+                发送
               </button>
             )}
           </div>
@@ -1873,7 +1650,7 @@ export function AgentPage() {
         <section className="ta-plan-card ta-plan-column">
           {expandedStyle && routePlan ? (
             <div className="ta-plan-detail">
-              <button type="button" className="ta-plan-detail-back" disabled={planning} onClick={() => { setExpandedStyle(null); setSelectedBlocks(new Set()); }}>
+              <button type="button" className="ta-plan-detail-back" onClick={() => setExpandedStyle(null)}>
                 ← 返回方案列表
               </button>
               <div className="ta-plan-detail-title">
@@ -1923,7 +1700,8 @@ export function AgentPage() {
                     const dayDate = dayBlocks[0]?.date ?? '';
                     const weather = (weatherData?.days ?? []).find((d) => d.date === dayDate);
                     return (
-                      <div key={day} className="ta-plan-style-day">
+                      <div key={day} className="ta-plan-style-day" tabIndex={-1}
+                        ref={element => { if (element) dayRefs.current.set(day, element); else dayRefs.current.delete(day); }}>
                         <div className="ta-plan-style-day-label">Day {day}</div>
                         {weather && (
                           <div className="ta-plan-block ta-plan-block-weather">
@@ -1939,12 +1717,17 @@ export function AgentPage() {
                             </div>
                           </div>
                         )}
-                        {dayBlocks.map((block) => (
-                          <div
-                            key={block.id}
-                            className={`ta-plan-block ta-plan-block-${block.type}${
-                              selectedBlocks.has(block.id) ? ' selected' : ''
-                            }`}
+                        {dayBlocks.map((block, index) => {
+                          const nextBlock = dayBlocks[index + 1];
+                          const leg = nextBlock ? expandedLegs.find((l) => l.from === block.id && l.to === nextBlock.id) : undefined;
+                          const legSummary = formatLegSummary(leg);
+                          return (
+                            <div key={block.id}>
+                              <div
+                                ref={element => { if (element) activityRefs.current.set(block.id, element); else activityRefs.current.delete(block.id); }}
+                                className={`ta-plan-block ta-plan-block-${block.type}${
+                                  selectedBlocks.has(block.id) ? ' selected' : ''
+                                }${reviewLocation?.style === expandedStyle && reviewLocation.ids.includes(block.id) ? ' ta-review-highlight' : ''}`}
                             onClick={(event) => {
                               if (!(event.target as Element).closest('button, a, input')) toggleBlock(block.id);
                             }}
@@ -1955,9 +1738,8 @@ export function AgentPage() {
                               }
                             }}
                             role="button"
-                            aria-pressed={selectedBlocks.has(block.id)}
-                            aria-disabled={planning}
                             tabIndex={0}
+                            aria-pressed={selectedBlocks.has(block.id)}
                             aria-label={`选择计划项 ${block.name}`}
                           >
                             <div className="ta-plan-block-left">
@@ -1988,9 +1770,6 @@ export function AgentPage() {
                                 <span className="ta-plan-block-price">
                                   {block.price_known === false ? '暂无报价' : `¥ ${block.price.toLocaleString()}`}
                                 </span>
-                              )}
-                              {block.price === null && (
-                                <span className="ta-plan-block-price">价格待确认</span>
                               )}
                               {block.options && block.options.length > 0 && (
                                 <div className="ta-plan-block-options">
@@ -2033,8 +1812,13 @@ export function AgentPage() {
                                 </div>
                               )}
                             </div>
-                          </div>
-                        ))}
+                              </div>
+                              {legSummary ? (
+                                <div className="ta-plan-block-leg">{legSummary}</div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
                       </div>
                     );
                   })}
@@ -2048,12 +1832,14 @@ export function AgentPage() {
                 <button
                   type="button"
                   className="ta-plan-confirm-button"
-                  disabled={planning || selectedBlocks.size > 0}
+                  disabled={!!confirmDisabledReason}
+                  title={confirmDisabledReason || undefined}
                   onClick={confirmPlan}
                 >
                   确认计划
                 </button>
               )}
+              {confirmDisabledReason && <p className="ta-review-confirm-hint">{confirmDisabledReason}</p>}
             </div>
           ) : (
             <>
@@ -2127,8 +1913,14 @@ export function AgentPage() {
                       type="button"
                       className={`ta-plan-style-card${
                         expandedStyle === style ? ' active' : ''
-                      }`}
-                      disabled={planning}
+                      }${routePlan.suggestions?.cover_image ? ' has-image' : ''}`}
+                      style={
+                        routePlan.suggestions?.cover_image
+                          ? ({
+                              '--cover-image': `url("${routePlan.suggestions.cover_image}")`,
+                            } as CSSProperties)
+                          : undefined
+                      }
                       onClick={() => chooseStyle(style)}
                     >
                       <span className="ta-plan-style-name">{style}</span>
@@ -2146,13 +1938,6 @@ export function AgentPage() {
                   </p>
                 </>
               )}
-              {import.meta.env.DEV && <button
-                type="button"
-                className="ta-plan-mock-button"
-                onClick={loadMockData}
-              >
-                加载演示行程
-              </button>}
             </div>
           )}
             </>
@@ -2320,6 +2105,10 @@ export function AgentPage() {
       </div>
 
       {/* 悬浮地图：拖动标题栏可以自由移动 */}
+      {(routePlan || reviewProgress) && <PlanReviewWindow
+        plan={routePlan ?? {blocks:[],review_pending:planning}} busy={planning} progress={reviewProgress}
+        onLocate={locateReviewIssue} onRetry={() => void retryReview()} onRepair={() => void retryReview()} />}
+
       {isMapHidden && (
         <button
           type="button"
@@ -2676,7 +2465,7 @@ export function AgentPage() {
                       className={`ta-plan-rating-button${
                         planRating === option.value ? ' active' : ''
                       }`}
-                      disabled={saveState === 'saving'}
+                      disabled={saveState === 'saving' || !!confirmDisabledReason}
                       onClick={() => setPlanRating(option.value)}
                     >
                       {option.label}
@@ -2712,7 +2501,7 @@ export function AgentPage() {
               <button
                 type="button"
                 className="ta-primary-button"
-                disabled={saveState === 'saving'}
+                disabled={saveState === 'saving' || !!confirmDisabledReason}
                 onClick={() => void acceptPlan()}
               >
                 {saveState === 'saving' ? '保存中…' : '确认接受'}

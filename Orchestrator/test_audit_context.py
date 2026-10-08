@@ -1,7 +1,9 @@
 import copy
 import unittest
 
-from orchestrator import _plan_for_validate, _search_for_validate
+from unittest.mock import patch
+import orchestrator as flow
+from ValidateAgent.context import plan_for_model as _plan_for_validate, search_for_model as _search_for_validate
 
 
 class AuditContextTests(unittest.TestCase):
@@ -18,7 +20,7 @@ class AuditContextTests(unittest.TestCase):
         self.assertEqual(result["blocks"][0]["distance_m"], 120)
         self.assertEqual(result["legs"], [{"duration": 120}])
         self.assertEqual(result["unpriced_items"], {"推荐": ["酒店"]})
-        self.assertNotIn("options", result["blocks"][0])
+        self.assertEqual(result["blocks"][0]["options"], meal["options"])
         self.assertNotIn("food_by_anchor", result)
         self.assertEqual(plan, original)
 
@@ -28,8 +30,81 @@ class AuditContextTests(unittest.TestCase):
                            {"name": "其他餐厅"}], "social_food": [{"text": "长文"}]}
         result = _search_for_validate(search, {"blocks": [{"name": "选中餐厅"}]})
         self.assertEqual(result["weather"], search["weather"])
-        self.assertEqual(result["food"], search["food"][:1])
+        self.assertEqual(result["food"], search["food"])
         self.assertNotIn("social_food", result)
+
+    def test_main_flow_preserves_audit_locations_revision_and_history(self):
+        plan = {"revision": 7, "blocks": [{"id": "b1", "plan_style": "经典", "day": 1, "date": "2026-10-10"}]}
+        issue = {"severity": "high", "type": "时间", "detail": "赶不上列车", "suggestion": "提前结束",
+                 "actionable": True, "plan_style": "经典", "day": 1, "date": "2026-10-10", "block_ids": ["b1"],
+                 "evidence": [{"path": "plan.legs[0].duration_s", "value": 2700}]}
+        state = {"plan": plan, "iteration": 1, "profile": {"city": "福州"},
+                 "preferences": {"culture": True}, "recent_trips": [{"destination": "上海"}],
+                 "search": {"weather": {"rain": True}}, "basic": {"total_budget": 4000}}
+        with patch.object(flow, "_call", return_value={"passed": False, "issues": [issue]}) as call:
+            result = flow.validate_node(state)
+        payload = call.call_args.args[2]
+        for key in ("profile", "preferences", "recent_trips", "basic"):
+            self.assertEqual(payload[key], state[key])
+        self.assertEqual(payload["search"], state["search"])
+        self.assertEqual(payload["plan"], plan)
+        self.assertEqual(result["audit"]["plan_revision"], 7)
+        self.assertEqual(result["audit"]["status"], "blocked")
+        self.assertEqual(result["history"][0]["issues"][0]["block_ids"], ["b1"])
+        self.assertEqual(result["history"][0]["issues"][0]["evidence"], issue["evidence"])
+        self.assertIn("赶不上列车", result["feedback"])
+
+    def test_invented_location_is_service_error_and_does_not_replan(self):
+        plan = {"revision": 1, "blocks": [{"id": "real"}]}
+        raw = {"passed": False, "issues": [{"severity": "high", "detail": "冲突", "suggestion": "修改",
+                                           "actionable": True, "block_ids": ["invented"]}]}
+        with patch.object(flow, "_call", return_value=raw):
+            result = flow.validate_node({"plan": plan, "iteration": 1})
+        self.assertEqual(result["audit"]["status"], "error")
+        self.assertFalse(result["audit"]["passed"])
+        self.assertIsNone(result["feedback"])
+        self.assertEqual(flow.should_continue({"plan": plan, "iteration": 1, **result}), "end")
+
+    def test_edit_falls_back_to_saved_basic_and_invalidates_old_audit(self):
+        previous = {"revision": 4, "basic": {"total_budget": 100}, "audit": {"passed": True}, "blocks": []}
+        with patch.object(flow, "_call", return_value={"blocks": []}) as call:
+            result = flow.plan_node({"plan": previous, "modify": {"mode": "global"}})
+        self.assertEqual(call.call_args.args[2]["basic"], {"total_budget": 100})
+        self.assertEqual(result["basic"], {"total_budget": 100})
+        self.assertIsNone(result["audit"])
+        self.assertNotIn("audit", result["plan"])
+        self.assertEqual(result["plan"]["revision"], 5)
+        self.assertIn("audit", previous)
+
+    def test_city_food_preview_is_kept_but_planner_and_review_use_correct_sources(self):
+        city = {"name": "全城展示餐厅", "url": "https://example.test/city"}
+        actual = {"name": "景点附近餐厅", "url": "https://example.test/anchor"}
+        original_search = {"food": [city], "hotels": []}
+        generated = {"blocks": [], "food": [actual], "food_by_anchor": [{"restaurants": [actual]}]}
+        with patch.object(flow, "_call", return_value=generated) as planner:
+            result = flow.plan_node({"search": original_search})
+        self.assertNotIn("food", planner.call_args.args[2]["search"])
+        self.assertNotIn("food_preview", planner.call_args.args[2]["search"])
+        self.assertEqual(result["search"]["food"], [actual])
+        self.assertEqual(result["search"]["food_preview"], [city])
+        self.assertEqual(original_search["food"], [city])
+        with patch.object(flow, "_call", return_value={"passed": True, "issues": []}) as reviewer:
+            flow.validate_node(result)
+        self.assertEqual(reviewer.call_args.args[2]["search"]["food"], [actual])
+        self.assertEqual(_search_for_validate(result["search"])["food"], [actual])
+        self.assertNotIn("food_preview", _search_for_validate(result["search"]))
+        with patch.object(flow, "_call", return_value=generated) as planner:
+            second = flow.plan_node(result)
+        self.assertEqual(second["search"]["food_preview"], [city])
+        self.assertNotIn("food_preview", planner.call_args.args[2]["search"])
+
+    def test_global_edit_keeps_the_resolved_new_budget_for_review(self):
+        changed = {"blocks": [], "basic": {"total_budget": 200}}
+        with patch.object(flow, "_call", return_value=changed):
+            result = flow.plan_node({"plan": {"revision": 4}, "basic": {"total_budget": 100},
+                                     "modify": {"mode": "global"}})
+        self.assertEqual(result["basic"], {"total_budget": 200})
+        self.assertEqual(result["plan"]["basic"], {"total_budget": 200})
 
 
 if __name__ == "__main__":

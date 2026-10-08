@@ -14,7 +14,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import BehaviorSignal, MemoryCache, UserPreference
+from app.models import BehaviorSignal, MemoryCache, TripMemory, UserPreference
 import sys
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -120,11 +120,8 @@ def _preferred_all(signals: list[BehaviorSignal], groups: dict[str, list[str]]) 
 def _learn(signals: list[BehaviorSignal], min_count: int) -> dict:
     prefs: dict = {}
 
-    # 节奏与交通：直接取出现最多的偏好
-    pace = _preferred(signals, PACE_WORDS)
+    # 交通：直接取出现最多的偏好（节奏 pace 改为只从历史行程提取）
     transport = _preferred_all(signals, TRANSPORT_WORDS)
-    if pace:
-        prefs["pace"] = pace[0]
     if transport:
         prefs["transport"] = transport
 
@@ -142,22 +139,16 @@ def _learn(signals: list[BehaviorSignal], min_count: int) -> dict:
     if food_avoid:
         prefs.setdefault("food", {})["avoid"] = food_avoid
 
-    # 喜欢/不喜欢的具体对象（景点、饭店、酒店等），出现次数达到阈值才沉淀
-    liked: dict[str, int] = {}
+    # 避雷对象（喜欢 liked 改为从最近高评价行程确定性提取）
     disliked: dict[str, int] = {}
     for s in signals:
         target = (s.target or "").strip()
         if not target:
             continue
         polarity = _action_polarity(s.action)
-        if polarity > 0:
-            liked[target] = liked.get(target, 0) + 1
-        elif polarity < 0:
+        if polarity < 0:
             disliked[target] = disliked.get(target, 0) + 1
-    liked = {k: v for k, v in liked.items() if v >= min_count}
     disliked = {k: v for k, v in disliked.items() if v >= min_count}
-    if liked:
-        prefs["liked"] = sorted(liked, key=lambda k: -liked[k])
     if disliked:
         prefs["avoided"] = sorted(disliked, key=lambda k: -disliked[k])
 
@@ -189,6 +180,44 @@ def _merge(base: dict, learned: dict) -> dict:
     return out
 
 
+def _trip_attraction_types(final_plan: dict) -> list[str]:
+    """从一份已保存行程里提取所有景点的 category_label。"""
+    types: list[str] = []
+    for block in (final_plan or {}).get("blocks") or []:
+        if not isinstance(block, dict):
+            continue
+        if (block.get("type") or "") != "景点":
+            continue
+        label = str(block.get("category_label") or "").strip()
+        if label:
+            types.append(label)
+    return types
+
+
+def _liked_from_trips(
+    user_id: str, db: Session, top_n: int = 3, min_rating: int = 4
+) -> list[str]:
+    """从最近 top_n 次高评价（rating>=min_rating）旅行里，返回去得最多的景点类型。"""
+    trips = list(
+        db.scalars(
+            select(TripMemory)
+            .where(TripMemory.user_id == user_id)
+            .where(TripMemory.chosen_plan_style.is_not(None))
+            .where(TripMemory.rating >= min_rating)
+            .order_by(TripMemory.created_at.desc())
+            .limit(top_n)
+        )
+    )
+    counts: dict[str, int] = {}
+    for trip in trips:
+        for label in _trip_attraction_types(trip.final_plan):
+            counts[label] = counts.get(label, 0) + 1
+    if not counts:
+        return []
+    most = max(counts, key=lambda c: counts[c])
+    return [most]
+
+
 def aggregate_preferences(user_id: str, db: Session, min_count: int = 3) -> UserPreference:
     """读取该用户的行为信号，聚合偏好并 upsert 到 UserPreference。"""
     signals = list(
@@ -201,6 +230,8 @@ def aggregate_preferences(user_id: str, db: Session, min_count: int = 3) -> User
     current = db.scalar(select(UserPreference).where(UserPreference.user_id == user_id))
     learned = _learn(signals, min_count)
     merged = _merge(current.preferences if current else {}, learned)
+    # liked 由最近高评价行程确定性计算，覆盖规则/模型摘要的结果。
+    merged["liked"] = _liked_from_trips(user_id, db)
 
     if current is None:
         current = UserPreference(user_id=user_id, preferences=merged)
@@ -286,10 +317,11 @@ def merge_trip_preferences(
     learned: dict = {}
     learned = _merge(learned, _summarize_plan(final_plan))
     learned = _merge(learned, _summarize_conversation(conversation))
-    if not learned:
-        return None
+    # liked 由最近高评价行程确定性计算，不采纳模型摘要里的 liked。
+    learned.pop("liked", None)
     current = db.scalar(select(UserPreference).where(UserPreference.user_id == user_id))
     merged = _merge(current.preferences if current else {}, learned)
+    merged["liked"] = _liked_from_trips(user_id, db)
     if current is None:
         current = UserPreference(user_id=user_id, preferences=merged)
         db.add(current)

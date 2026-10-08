@@ -107,11 +107,19 @@ export interface SavedRouteLeg {
   day: number;
   from: string;
   to: string;
-  mode: 'walk' | 'transit' | 'drive';
+  mode: 'walk' | 'transit' | 'drive' | 'bike' | 'metro' | 'bus';
   distance_m: number;
   duration_s: number;
   lines?: string[];
   polyline: [number, number][];
+  options?: Array<{
+    mode: 'metro' | 'bus' | 'drive' | 'bike';
+    label: string;
+    duration_s: number;
+    distance_m: number;
+    lines?: string[];
+    price?: number;
+  }>;
 }
 
 export interface SavedWeatherDay {

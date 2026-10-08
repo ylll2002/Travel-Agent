@@ -13,11 +13,7 @@ export type RouteBlock = {
   note?: string;
   match_score?: number;
   link?: string;
-  price?: number | null;
-  unit_price?: number | null;
-  price_basis?: 'group' | 'per_person';
-  activity_window?: { start_min: number; end_min: number };
-  locked?: boolean;
+  price?: number;
   price_known?: boolean;
   meal?: string;
   anchor_name?: string;
@@ -29,7 +25,7 @@ export type RouteBlock = {
   walking_origin?: string | null;
   options?: Array<{
     name: string;
-    price?: number | null;
+    price?: number;
     link?: string;
     lng?: number;
     lat?: number;
@@ -51,11 +47,19 @@ export type RouteLeg = {
   day: number;
   from: string;
   to: string;
-  mode: 'walk' | 'transit' | 'drive';
+  mode: 'walk' | 'transit' | 'drive' | 'bike' | 'metro' | 'bus';
   distance_m: number;
   duration_s: number;
   lines?: string[];
   polyline: [number, number][];
+  options?: Array<{
+    mode: 'metro' | 'bus' | 'drive' | 'bike';
+    label: string;
+    duration_s: number;
+    distance_m: number;
+    lines?: string[];
+    price?: number;
+  }>;
 };
 
 type TripMapProps = {
@@ -73,11 +77,25 @@ const MODE_LABELS: Record<RouteLeg['mode'], string> = {
   walk: '步行',
   transit: '公交/地铁',
   drive: '打车',
+  bike: '骑行',
+  metro: '地铁',
+  bus: '公交',
 };
 
 const dayColor = (day: number) => DAY_COLORS[(Math.max(day, 1) - 1) % DAY_COLORS.length];
 
 function describeLeg(leg: RouteLeg) {
+  if (leg.options?.length) {
+    return leg.options
+      .map((o) => {
+        const minutes = Math.max(1, Math.round(o.duration_s / 60));
+        const km = (o.distance_m / 1000).toFixed(1);
+        const price = o.price != null ? ` · ¥${o.price}` : '';
+        const lines = o.lines?.length ? ` · ${o.lines.map(escapeHtml).join(' → ')}` : '';
+        return `${escapeHtml(o.label)} · ${minutes}分钟 · ${km}km${price}${lines}`;
+      })
+      .join('<br>');
+  }
   const minutes = Math.max(1, Math.round(leg.duration_s / 60));
   const km = (leg.distance_m / 1000).toFixed(1);
   const lines = leg.lines?.length ? ` · ${leg.lines.join(' → ')}` : '';

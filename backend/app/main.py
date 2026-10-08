@@ -16,7 +16,6 @@ from app.api.routes import (
     preferences,
     profile,
     question,
-    replan,
     search,
     trip_memory,
     trips,
@@ -85,5 +84,4 @@ app.include_router(trip_memory.router, prefix=api_prefix)
 app.include_router(behavior_signal.router, prefix=api_prefix)
 app.include_router(memory_cache.router, prefix=api_prefix)
 app.include_router(plan.router, prefix=api_prefix)
-app.include_router(replan.router, prefix=api_prefix)
 app.include_router(search.router, prefix=api_prefix)

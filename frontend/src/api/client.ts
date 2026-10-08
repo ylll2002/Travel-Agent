@@ -63,6 +63,8 @@ export const api = {
     start_date?: string;
     end_date?: string;
     profile?: unknown;
+    preferences?: unknown;
+    recent_trips?: unknown;
     basic?: unknown;
     modify?: unknown;
     plan?: unknown;
@@ -72,6 +74,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
       signal,
+    }),
+  reviewPlan: (payload: { plan: unknown; search: unknown }, signal?: AbortSignal) =>
+    request<Record<string, unknown>>('/plan/review', {
+      method: 'POST', body: JSON.stringify(payload), signal,
     }),
   chat: (messages: ChatMessage[]) =>
     request<ChatResponse>('/agent/chat', {

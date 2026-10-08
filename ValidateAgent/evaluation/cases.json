@@ -1,0 +1,2049 @@
+{
+  "schema_version": 1,
+  "note": "人工设计的合成回归案例；example.test 为保留示例域名。模型输出为预置替身，不能测量真实模型能力。",
+  "cases": [
+    {
+      "id": "known-valid",
+      "description": "完整来源、时间和已知费用，无硬冲突",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a"
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "passed",
+        "high": [],
+        "warning_types": []
+      }
+    },
+    {
+      "id": "budget-over",
+      "description": "已知活动费用超出本次明确总预算",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 120,
+              "price_known": true,
+              "link": "https://example.test/a"
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "blocked",
+        "high": [
+          {
+            "type": "预算",
+            "plan_style": "经典",
+            "block_ids": [
+              "a"
+            ],
+            "source": "rule"
+          }
+        ],
+        "warning_types": []
+      }
+    },
+    {
+      "id": "formatted-money",
+      "description": "货币符号与千位分隔仍能核算",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": "￥1,125",
+              "price_known": true,
+              "link": "https://example.test/a"
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": "CNY 1,000元"
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "blocked",
+        "high": [
+          {
+            "type": "预算",
+            "plan_style": "经典",
+            "block_ids": [
+              "a"
+            ],
+            "source": "rule"
+          }
+        ],
+        "warning_types": []
+      }
+    },
+    {
+      "id": "group-price",
+      "description": "总价已经包含两人，不能再次乘人数",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 80,
+              "price_known": true,
+              "link": "https://example.test/a",
+              "unit_price": 40,
+              "price_basis": "per_person"
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100,
+          "travelers": "2人"
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "passed",
+        "high": [],
+        "warning_types": []
+      }
+    },
+    {
+      "id": "alternative-styles",
+      "description": "备选方案不能累加为同一笔消费",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 80,
+              "price_known": true,
+              "link": "https://example.test/a"
+            },
+            {
+              "id": "c",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "轻松",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 80,
+              "price_known": true,
+              "link": "https://example.test/c"
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            },
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/c"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "passed",
+        "high": [],
+        "warning_types": []
+      }
+    },
+    {
+      "id": "unknown-price",
+      "description": "未知零元价格不能当成免费或超支证据",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 0,
+              "price_known": false,
+              "link": "https://example.test/a"
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "warning",
+        "high": [],
+        "warning_types": [
+          "预算"
+        ]
+      }
+    },
+    {
+      "id": "stale-total",
+      "description": "旧汇总不能覆盖全部已知活动价格",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 20,
+              "price_known": true,
+              "link": "https://example.test/a"
+            }
+          ],
+          "cost_by_style": {
+            "经典": 999
+          }
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "warning",
+        "high": [],
+        "warning_types": [
+          "预算"
+        ]
+      }
+    },
+    {
+      "id": "overlap",
+      "description": "同一方案同一天的活动有时间重叠",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a"
+            },
+            {
+              "id": "b",
+              "name": "示例公园",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "10:30-12:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/b"
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            },
+            {
+              "name": "示例公园",
+              "url": "https://example.test/b"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "blocked",
+        "high": [
+          {
+            "type": "时间",
+            "plan_style": "经典",
+            "block_ids": [
+              "a",
+              "b"
+            ],
+            "source": "rule"
+          }
+        ],
+        "warning_types": []
+      }
+    },
+    {
+      "id": "route-too-long",
+      "description": "真实交通耗时大于活动间隙",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a"
+            },
+            {
+              "id": "b",
+              "name": "示例公园",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "11:20-12:30",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/b"
+            }
+          ],
+          "legs": [
+            {
+              "plan_style": "经典",
+              "day": 1,
+              "from": "a",
+              "to": "b",
+              "duration_s": 2700
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            },
+            {
+              "name": "示例公园",
+              "url": "https://example.test/b"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "blocked",
+        "high": [
+          {
+            "type": "交通",
+            "plan_style": "经典",
+            "block_ids": [
+              "a",
+              "b"
+            ],
+            "source": "rule"
+          }
+        ],
+        "warning_types": []
+      }
+    },
+    {
+      "id": "route-exact-boundary",
+      "description": "间隙恰好等于真实路线耗时，不误判",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a"
+            },
+            {
+              "id": "b",
+              "name": "示例公园",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "11:45-12:30",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/b"
+            }
+          ],
+          "legs": [
+            {
+              "plan_style": "经典",
+              "day": 1,
+              "from": "a",
+              "to": "b",
+              "duration_s": 2700
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            },
+            {
+              "name": "示例公园",
+              "url": "https://example.test/b"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "passed",
+        "high": [],
+        "warning_types": []
+      }
+    },
+    {
+      "id": "route-missing",
+      "description": "无路线耗时只能提示，不能编造硬冲突",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a"
+            },
+            {
+              "id": "b",
+              "name": "示例公园",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "12:00-13:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/b"
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            },
+            {
+              "name": "示例公园",
+              "url": "https://example.test/b"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "warning",
+        "high": [],
+        "warning_types": [
+          "交通"
+        ]
+      }
+    },
+    {
+      "id": "venue-not-in-source",
+      "description": "完整的非空候选中找不到所选地点",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a"
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "另一示例景点",
+              "url": "https://example.test/other"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "blocked",
+        "high": [
+          {
+            "type": "真实性",
+            "plan_style": "经典",
+            "block_ids": [
+              "a"
+            ],
+            "source": "rule"
+          }
+        ],
+        "warning_types": []
+      }
+    },
+    {
+      "id": "source-missing",
+      "description": "类别来源为空不能断言地点不存在",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a"
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": []
+        }
+      },
+      "expected": {
+        "status": "warning",
+        "high": [],
+        "warning_types": [
+          "真实性"
+        ]
+      }
+    },
+    {
+      "id": "wrong-branch",
+      "description": "不同分店不能只凭品牌名匹配",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例餐厅（甲店）",
+              "type": "美食",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a"
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [],
+          "food": [
+            {
+              "name": "示例餐厅（乙店）",
+              "url": "https://example.test/b"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "blocked",
+        "high": [
+          {
+            "type": "真实性",
+            "plan_style": "经典",
+            "block_ids": [
+              "a"
+            ],
+            "source": "rule"
+          }
+        ],
+        "warning_types": []
+      }
+    },
+    {
+      "id": "source-alias",
+      "description": "仅使用实际来源提供的别名匹配",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a"
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆正式名称",
+              "aliases": [
+                "示例博物馆"
+              ],
+              "url": "https://example.test/a"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "passed",
+        "high": [],
+        "warning_types": []
+      }
+    },
+    {
+      "id": "overnight-train",
+      "description": "跨日列车不误当成同日时间倒置",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "t",
+              "name": "示例列车G123",
+              "type": "交通",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "23:00-01:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/t",
+              "train_no": "G123",
+              "dep_time": "2026-10-10T23:00:00",
+              "arr_time": "2026-10-11T01:00:00"
+            },
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 2,
+              "date": "2026-10-11",
+              "time": "09:00-11:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a"
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "passed",
+        "high": [],
+        "warning_types": []
+      }
+    },
+    {
+      "id": "flight-buffer",
+      "description": "活动结束到航班出发不足项目120分钟预留",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "15:00-17:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a"
+            },
+            {
+              "id": "f",
+              "name": "示例航班MU123",
+              "type": "交通",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/f",
+              "flight_no": "MU123",
+              "dep_time": "2026-10-10T18:00:00",
+              "arr_time": "2026-10-10T20:00:00"
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "blocked",
+        "high": [
+          {
+            "type": "交通",
+            "plan_style": "经典",
+            "block_ids": [
+              "a",
+              "f"
+            ],
+            "source": "rule"
+          }
+        ],
+        "warning_types": []
+      }
+    },
+    {
+      "id": "empty-plan",
+      "description": "没有任何活动的方案不能通过",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": []
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": []
+        }
+      },
+      "expected": {
+        "status": "blocked",
+        "high": [
+          {
+            "type": "完整性",
+            "plan_style": null,
+            "block_ids": [],
+            "source": "rule"
+          }
+        ],
+        "warning_types": []
+      }
+    },
+    {
+      "id": "hybrid-rule-preserved",
+      "description": "模型替身返回通过不能覆盖规则超支",
+      "mode": "hybrid_fixture",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 120,
+              "price_known": true,
+              "link": "https://example.test/a"
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "blocked",
+        "high": [
+          {
+            "type": "预算",
+            "plan_style": "经典",
+            "block_ids": [
+              "a"
+            ],
+            "source": "rule"
+          }
+        ],
+        "warning_types": []
+      },
+      "model_fixture": {
+        "passed": true,
+        "issues": []
+      }
+    },
+    {
+      "id": "hybrid-no-issues",
+      "description": "规则无问题且模型替身通过，完整审核通过",
+      "mode": "hybrid_fixture",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a"
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "passed",
+        "high": [],
+        "warning_types": []
+      },
+      "model_fixture": {
+        "passed": true,
+        "issues": []
+      }
+    },
+    {
+      "id": "hybrid-explicit-allergy",
+      "description": "模拟模型的明确忌口问题有真实输入依据",
+      "mode": "hybrid_fixture",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例餐厅",
+              "type": "美食",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a"
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100,
+          "notes": "花生过敏，不能食用花生"
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [],
+          "food": [
+            {
+              "name": "示例餐厅",
+              "url": "https://example.test/a",
+              "ingredients": [
+                "花生"
+              ]
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "blocked",
+        "high": [
+          {
+            "type": "偏好",
+            "plan_style": "经典",
+            "block_ids": [
+              "a"
+            ],
+            "source": "model"
+          }
+        ],
+        "warning_types": []
+      },
+      "model_fixture": {
+        "passed": false,
+        "issues": [
+          {
+            "severity": "high",
+            "type": "偏好",
+            "detail": "餐厅菜单与本次明确花生过敏要求冲突",
+            "suggestion": "替换为已有合适候选",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "actionable": true,
+            "evidence": [
+              {
+                "path": "basic.notes",
+                "value": "花生过敏，不能食用花生"
+              },
+              {
+                "path": "search.food[0].ingredients[0]",
+                "value": "花生"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "hybrid-weather-unsupported",
+      "description": "无天气证据的模拟严重判断降为建议",
+      "mode": "hybrid_fixture",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a"
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "warning",
+        "high": [],
+        "warning_types": [
+          "天气"
+        ]
+      },
+      "model_fixture": {
+        "passed": false,
+        "issues": [
+          {
+            "severity": "high",
+            "type": "天气",
+            "detail": "缺少天气数据却声称当天暴雨",
+            "suggestion": "替换为已有合适候选",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "actionable": true,
+            "evidence": []
+          }
+        ]
+      }
+    },
+    {
+      "id": "hybrid-model-error",
+      "description": "模拟模型超时保留未知报价规则提示，不能显示通过",
+      "mode": "hybrid_fixture",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 30,
+              "price_known": false,
+              "link": "https://example.test/a"
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "error",
+        "high": [],
+        "warning_types": [
+          "预算"
+        ]
+      },
+      "model_fixture": {
+        "error": "模拟模型超时"
+      }
+    },
+    {
+      "id": "hybrid-weather-evidence",
+      "description": "模拟天气风险引用实际预报值，保留严重问题",
+      "mode": "hybrid_fixture",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a",
+              "note": "露天活动"
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            }
+          ],
+          "weather": {
+            "days": [
+              {
+                "date": "2026-10-10",
+                "weather": "暴雨"
+              }
+            ]
+          }
+        }
+      },
+      "expected": {
+        "status": "blocked",
+        "high": [
+          {
+            "type": "天气",
+            "plan_style": "经典",
+            "block_ids": [
+              "a"
+            ],
+            "source": "model"
+          }
+        ],
+        "warning_types": []
+      },
+      "model_fixture": {
+        "passed": false,
+        "issues": [
+          {
+            "severity": "high",
+            "type": "天气",
+            "detail": "暴雨期间安排露天活动",
+            "suggestion": "选择室内候选",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "actionable": true,
+            "evidence": [
+              {
+                "path": "search.weather.days[0].weather",
+                "value": "暴雨"
+              },
+              {
+                "path": "plan.blocks[0].note",
+                "value": "露天活动"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "selected-meal-index-zero",
+      "description": "餐厅第一个选项索引0是有效选择，不误当成未选定",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "午餐",
+              "type": "美食",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a",
+              "selected_option": 0,
+              "options": [
+                {
+                  "name": "示例餐厅甲",
+                  "link": "https://example.test/a",
+                  "price": 30
+                },
+                {
+                  "name": "示例餐厅乙",
+                  "link": "https://example.test/b",
+                  "price": 60
+                }
+              ]
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "food": [
+            {
+              "name": "示例餐厅甲",
+              "url": "https://example.test/a"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "passed",
+        "high": [],
+        "warning_types": []
+      }
+    },
+    {
+      "id": "hybrid-unknown-quote-pass",
+      "description": "报价未知但没有其他严重问题，组合审核可以通过并保留提示",
+      "mode": "hybrid_fixture",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 0,
+              "price_known": false,
+              "link": "https://example.test/a",
+              "unit_price": null
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "warning",
+        "high": [],
+        "warning_types": [
+          "预算"
+        ]
+      },
+      "model_fixture": {
+        "passed": true,
+        "issues": []
+      }
+    },
+    {
+      "id": "hybrid-unknown-quote-not-hard-conflict",
+      "description": "仅因报价缺失的模拟完整性严重问题降为建议，专项上限也不改变这一点",
+      "mode": "hybrid_fixture",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "09:00-11:00",
+              "price": 0,
+              "price_known": false,
+              "link": "https://example.test/a",
+              "unit_price": null
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100,
+          "hard_limits": {
+            "ticket_price": 20
+          }
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "warning",
+        "high": [],
+        "warning_types": [
+          "完整性",
+          "预算"
+        ]
+      },
+      "model_fixture": {
+        "passed": false,
+        "issues": [
+          {
+            "severity": "high",
+            "type": "完整性",
+            "detail": "景点暂无报价所以不能通过",
+            "suggestion": "预订前核实报价",
+            "actionable": true,
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "evidence": [
+              {
+                "path": "basic.hard_limits.ticket_price",
+                "value": 20
+              },
+              {
+                "path": "plan.blocks[0].price_known",
+                "value": false
+              },
+              {
+                "path": "plan.blocks[0].unit_price",
+                "value": null
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "city-default-transit-unconfirmed",
+      "description": "40分钟间隔，默认公交45分钟，但未固定交通方式；只核实，不阻断",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "12:00-13:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a"
+            },
+            {
+              "id": "b",
+              "name": "示例公园",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "13:40-14:10",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/b"
+            }
+          ],
+          "legs": [
+            {
+              "from": "a",
+              "to": "b",
+              "mode": "transit",
+              "duration_s": 2708
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            },
+            {
+              "name": "示例公园",
+              "url": "https://example.test/b"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "warning",
+        "high": [],
+        "warning_types": [
+          "交通"
+        ]
+      }
+    },
+    {
+      "id": "city-driving-fits",
+      "description": "40分钟间隔，已核实驾车约14分钟，不能附加进出站预留",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "12:00-13:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a"
+            },
+            {
+              "id": "b",
+              "name": "示例公园",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "13:40-14:10",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/b"
+            }
+          ],
+          "legs": [
+            {
+              "from": "a",
+              "to": "b",
+              "mode": "drive",
+              "duration_s": 848
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            },
+            {
+              "name": "示例公园",
+              "url": "https://example.test/b"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "passed",
+        "high": [],
+        "warning_types": []
+      }
+    },
+    {
+      "id": "city-known-alternative-fits",
+      "description": "默认公交偏慢，但已有真实驾车备选能容纳转场",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "12:00-13:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a"
+            },
+            {
+              "id": "b",
+              "name": "示例公园",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "13:40-14:10",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/b"
+            }
+          ],
+          "legs": [
+            {
+              "from": "a",
+              "to": "b",
+              "mode": "transit",
+              "duration_s": 2708,
+              "alternatives": [
+                {
+                  "mode": "drive",
+                  "duration_s": 848
+                }
+              ]
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            },
+            {
+              "name": "示例公园",
+              "url": "https://example.test/b"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "passed",
+        "high": [],
+        "warning_types": []
+      }
+    },
+    {
+      "id": "city-fixed-transit-conflict",
+      "description": "固定采用公交，即使驾车更快也不能放过真实不足",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "12:00-13:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a"
+            },
+            {
+              "id": "b",
+              "name": "示例公园",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "13:40-14:10",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/b"
+            }
+          ],
+          "legs": [
+            {
+              "from": "a",
+              "to": "b",
+              "mode": "transit",
+              "duration_s": 2708,
+              "mode_locked": true,
+              "alternatives": [
+                {
+                  "mode": "drive",
+                  "duration_s": 848
+                }
+              ]
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            },
+            {
+              "name": "示例公园",
+              "url": "https://example.test/b"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "blocked",
+        "high": [
+          {
+            "type": "交通",
+            "plan_style": "经典",
+            "block_ids": [
+              "a",
+              "b"
+            ],
+            "source": "rule"
+          }
+        ],
+        "warning_types": []
+      }
+    },
+    {
+      "id": "city-driving-too-short",
+      "description": "仅10分钟间隔，驾车也需约14分钟，保留真实严重冲突",
+      "mode": "rules",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "12:00-13:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a"
+            },
+            {
+              "id": "b",
+              "name": "示例公园",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "13:10-14:10",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/b"
+            }
+          ],
+          "legs": [
+            {
+              "from": "a",
+              "to": "b",
+              "mode": "drive",
+              "duration_s": 848
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            },
+            {
+              "name": "示例公园",
+              "url": "https://example.test/b"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "blocked",
+        "high": [
+          {
+            "type": "交通",
+            "plan_style": "经典",
+            "block_ids": [
+              "a",
+              "b"
+            ],
+            "source": "rule"
+          }
+        ],
+        "warning_types": []
+      }
+    },
+    {
+      "id": "model-city-mode-false-block",
+      "description": "模型不能把未固定的市内公交方式加上进出站缓冲重新判high",
+      "mode": "hybrid_fixture",
+      "input": {
+        "plan": {
+          "revision": 1,
+          "destination": "示例城市",
+          "start_date": "2026-10-10",
+          "end_date": "2026-10-11",
+          "blocks": [
+            {
+              "id": "a",
+              "name": "示例博物馆",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "12:00-13:00",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/a"
+            },
+            {
+              "id": "b",
+              "name": "示例公园",
+              "type": "景点",
+              "plan_style": "经典",
+              "day": 1,
+              "date": "2026-10-10",
+              "time": "13:40-14:10",
+              "price": 30,
+              "price_known": true,
+              "link": "https://example.test/b"
+            }
+          ],
+          "legs": [
+            {
+              "from": "a",
+              "to": "b",
+              "mode": "transit",
+              "duration_s": 2708
+            }
+          ]
+        },
+        "basic": {
+          "total_budget": 100
+        },
+        "search": {
+          "grounding_scope": "full",
+          "poi": [
+            {
+              "name": "示例博物馆",
+              "url": "https://example.test/a"
+            },
+            {
+              "name": "示例公园",
+              "url": "https://example.test/b"
+            }
+          ]
+        }
+      },
+      "expected": {
+        "status": "warning",
+        "high": [],
+        "warning_types": [
+          "交通"
+        ]
+      },
+      "model_fixture": {
+        "passed": false,
+        "issues": [
+          {
+            "severity": "high",
+            "type": "交通",
+            "detail": "间隔不足以容纳公交及进出站预留",
+            "suggestion": "重新安排行程",
+            "actionable": true,
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a",
+              "b"
+            ],
+            "evidence": [
+              {
+                "path": "plan.legs[0].duration_s",
+                "value": 2708
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

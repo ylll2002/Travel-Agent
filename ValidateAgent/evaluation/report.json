@@ -1,0 +1,2318 @@
+{
+  "schema_version": 1,
+  "evaluation_kind": "offline_synthetic_regression",
+  "dataset_sha256": "79290996feb9d232838cbaa785dde543b982bb8d47a63e8356f86e4a1142f23b",
+  "limitations": [
+    "规则结果不代表完整模型审核通过。",
+    "模型替身用于验证合并与证据保护，不评价真实模型语义质量。",
+    "合成案例不代表实际旅游信息；来源覆盖率只衡量给定快照。",
+    "指标基于人工案例标签，不是生产准确率或独立泛化测试。"
+  ],
+  "metrics": {
+    "case_count": 33,
+    "passed_cases": 33,
+    "status_accuracy": 1.0,
+    "high_true_positive": 13,
+    "high_false_positive": 0,
+    "high_false_negative": 0,
+    "high_precision": 1.0,
+    "high_recall": 1.0,
+    "false_blocked_cases": 0,
+    "missed_blocked_cases": 0,
+    "evidence_count": 55,
+    "verifiable_evidence_count": 55,
+    "evidence_value_match_rate": 1.0,
+    "named_occurrences": 43,
+    "matched_occurrences": 40,
+    "source_coverage": 0.9302
+  },
+  "cases": [
+    {
+      "id": "known-valid",
+      "description": "完整来源、时间和已知费用，无硬冲突",
+      "mode": "rules",
+      "expected_status": "passed",
+      "actual_status": "passed",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "passed",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [],
+        "feedback": "现有数据范围内规则检查通过。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 30.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 1,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "budget-over",
+      "description": "已知活动费用超出本次明确总预算",
+      "mode": "rules",
+      "expected_status": "blocked",
+      "actual_status": "blocked",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "blocked",
+        "passed": false,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "high",
+            "type": "预算",
+            "detail": "「经典」已知费用120元超过用户总预算100元。",
+            "suggestion": "减少或替换付费项目，按该方案重新核算费用。",
+            "actionable": true,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "evidence": [
+              {
+                "path": "plan.blocks[0].price",
+                "value": 120
+              },
+              {
+                "path": "basic.total_budget",
+                "value": 100
+              }
+            ]
+          }
+        ],
+        "feedback": "请修复规则发现的严重问题。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 120.0,
+              "budget_status": "over",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 1,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "formatted-money",
+      "description": "货币符号与千位分隔仍能核算",
+      "mode": "rules",
+      "expected_status": "blocked",
+      "actual_status": "blocked",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "blocked",
+        "passed": false,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "high",
+            "type": "预算",
+            "detail": "「经典」已知费用1125元超过用户总预算1000元。",
+            "suggestion": "减少或替换付费项目，按该方案重新核算费用。",
+            "actionable": true,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "evidence": [
+              {
+                "path": "plan.blocks[0].price",
+                "value": "￥1,125"
+              },
+              {
+                "path": "basic.total_budget",
+                "value": "CNY 1,000元"
+              }
+            ]
+          }
+        ],
+        "feedback": "请修复规则发现的严重问题。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 1125.0,
+              "budget_status": "over",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 1,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "group-price",
+      "description": "总价已经包含两人，不能再次乘人数",
+      "mode": "rules",
+      "expected_status": "passed",
+      "actual_status": "passed",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "passed",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [],
+        "feedback": "现有数据范围内规则检查通过。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 80.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 1,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "alternative-styles",
+      "description": "备选方案不能累加为同一笔消费",
+      "mode": "rules",
+      "expected_status": "passed",
+      "actual_status": "passed",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "passed",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典",
+          "轻松"
+        ],
+        "issues": [],
+        "feedback": "现有数据范围内规则检查通过。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 80.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            },
+            "轻松": {
+              "known_cost": 80.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 2,
+            "matched_count": 2,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "unknown-price",
+      "description": "未知零元价格不能当成免费或超支证据",
+      "mode": "rules",
+      "expected_status": "warning",
+      "actual_status": "warning",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [
+        "预算"
+      ],
+      "expected_warning_types": [
+        "预算"
+      ],
+      "audit": {
+        "schema_version": 1,
+        "status": "warning",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "medium",
+            "type": "预算",
+            "detail": "「经典」有报价未知项目，已知小计不代表完整总费用。",
+            "suggestion": "预订前核实缺失报价；未知价格不能当作免费。",
+            "actionable": false,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "evidence": [
+              {
+                "path": "plan.blocks[0]",
+                "value": {
+                  "id": "a",
+                  "name": "示例博物馆",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "09:00-11:00",
+                  "price": 0,
+                  "price_known": false,
+                  "link": "https://example.test/a"
+                }
+              }
+            ]
+          }
+        ],
+        "feedback": "规则未发现严重冲突；未知信息和风险提示仍需核实。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 0.0,
+              "budget_status": "unknown",
+              "unknown_count": 1
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 1,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "stale-total",
+      "description": "旧汇总不能覆盖全部已知活动价格",
+      "mode": "rules",
+      "expected_status": "warning",
+      "actual_status": "warning",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [
+        "预算"
+      ],
+      "expected_warning_types": [
+        "预算"
+      ],
+      "audit": {
+        "schema_version": 1,
+        "status": "warning",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "medium",
+            "type": "预算",
+            "detail": "方案费用汇总与已知活动价格之和不一致，本次按活动价格重算。",
+            "suggestion": "刷新方案费用汇总，避免沿用修改前的总价。",
+            "actionable": false,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "evidence": [
+              {
+                "path": "plan.blocks[0].price",
+                "value": 20
+              },
+              {
+                "path": "plan.cost_by_style[\"经典\"]",
+                "value": 999
+              }
+            ]
+          }
+        ],
+        "feedback": "规则未发现严重冲突；未知信息和风险提示仍需核实。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 20.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 1,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "overlap",
+      "description": "同一方案同一天的活动有时间重叠",
+      "mode": "rules",
+      "expected_status": "blocked",
+      "actual_status": "blocked",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "blocked",
+        "passed": false,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "high",
+            "type": "时间",
+            "detail": "「示例博物馆」与「示例公园」时间重叠。",
+            "suggestion": "调整起止时间或减少活动，保留实际交通所需时间。",
+            "actionable": true,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a",
+              "b"
+            ],
+            "evidence": [
+              {
+                "path": "plan.blocks[0]",
+                "value": {
+                  "id": "a",
+                  "name": "示例博物馆",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "09:00-11:00",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/a"
+                }
+              },
+              {
+                "path": "plan.blocks[1]",
+                "value": {
+                  "id": "b",
+                  "name": "示例公园",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "10:30-12:00",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/b"
+                }
+              }
+            ]
+          }
+        ],
+        "feedback": "请修复规则发现的严重问题。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 60.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 2,
+            "matched_count": 2,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "route-too-long",
+      "description": "真实交通耗时大于活动间隙",
+      "mode": "rules",
+      "expected_status": "blocked",
+      "actual_status": "blocked",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "blocked",
+        "passed": false,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "high",
+            "type": "交通",
+            "detail": "「示例博物馆」到「示例公园」间隔20分钟，当前路线路线约45分钟，当前路线耗时超出可用间隔。",
+            "suggestion": "提前结束前一活动或推迟后一活动，保留实际转场所需时间。",
+            "actionable": true,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a",
+              "b"
+            ],
+            "evidence": [
+              {
+                "path": "plan.legs[0].duration_s",
+                "value": 2700
+              },
+              {
+                "path": "plan.blocks[0]",
+                "value": {
+                  "id": "a",
+                  "name": "示例博物馆",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "09:00-11:00",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/a"
+                }
+              },
+              {
+                "path": "plan.blocks[1]",
+                "value": {
+                  "id": "b",
+                  "name": "示例公园",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "11:20-12:30",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/b"
+                }
+              }
+            ]
+          }
+        ],
+        "feedback": "请修复规则发现的严重问题。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 60.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 2,
+            "matched_count": 2,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "route-exact-boundary",
+      "description": "间隙恰好等于真实路线耗时，不误判",
+      "mode": "rules",
+      "expected_status": "passed",
+      "actual_status": "passed",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "passed",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [],
+        "feedback": "现有数据范围内规则检查通过。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 60.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 2,
+            "matched_count": 2,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "route-missing",
+      "description": "无路线耗时只能提示，不能编造硬冲突",
+      "mode": "rules",
+      "expected_status": "warning",
+      "actual_status": "warning",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [
+        "交通"
+      ],
+      "expected_warning_types": [
+        "交通"
+      ],
+      "audit": {
+        "schema_version": 1,
+        "status": "warning",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "medium",
+            "type": "交通",
+            "detail": "相邻地点缺少实际路线耗时，能否及时赶到待核实。",
+            "suggestion": "补充这两个地点间的路线。",
+            "actionable": false,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a",
+              "b"
+            ],
+            "evidence": [
+              {
+                "path": "plan.blocks[0]",
+                "value": {
+                  "id": "a",
+                  "name": "示例博物馆",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "09:00-11:00",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/a"
+                }
+              },
+              {
+                "path": "plan.blocks[1]",
+                "value": {
+                  "id": "b",
+                  "name": "示例公园",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "12:00-13:00",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/b"
+                }
+              }
+            ]
+          }
+        ],
+        "feedback": "规则未发现严重冲突；未知信息和风险提示仍需核实。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 60.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 2,
+            "matched_count": 2,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "venue-not-in-source",
+      "description": "完整的非空候选中找不到所选地点",
+      "mode": "rules",
+      "expected_status": "blocked",
+      "actual_status": "blocked",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "blocked",
+        "passed": false,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "high",
+            "type": "真实性",
+            "detail": "「示例博物馆」未在提供的同类搜索候选中找到。",
+            "suggestion": "使用真实候选替换，或补充该地点的搜索来源；这不证明地点本身不存在。",
+            "actionable": true,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "evidence": [
+              {
+                "path": "plan.blocks[0]",
+                "value": {
+                  "id": "a",
+                  "name": "示例博物馆",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "09:00-11:00",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/a"
+                }
+              },
+              {
+                "path": "search.poi",
+                "value": [
+                  {
+                    "name": "另一示例景点",
+                    "url": "https://example.test/other"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "feedback": "请修复规则发现的严重问题。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 30.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 0,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 0.0
+          }
+        }
+      }
+    },
+    {
+      "id": "source-missing",
+      "description": "类别来源为空不能断言地点不存在",
+      "mode": "rules",
+      "expected_status": "warning",
+      "actual_status": "warning",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [
+        "真实性"
+      ],
+      "expected_warning_types": [
+        "真实性"
+      ],
+      "audit": {
+        "schema_version": 1,
+        "status": "warning",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "medium",
+            "type": "真实性",
+            "detail": "「示例博物馆」缺少该类别搜索数据，不能确认来源。",
+            "suggestion": "补充完整搜索快照再检查。",
+            "actionable": false,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "evidence": [
+              {
+                "path": "plan.blocks[0]",
+                "value": {
+                  "id": "a",
+                  "name": "示例博物馆",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "09:00-11:00",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/a"
+                }
+              },
+              {
+                "path": "search.poi",
+                "value": []
+              }
+            ]
+          }
+        ],
+        "feedback": "规则未发现严重冲突；未知信息和风险提示仍需核实。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 30.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 0,
+            "unavailable_count": 1,
+            "ambiguous_count": 0,
+            "coverage": 0.0
+          }
+        }
+      }
+    },
+    {
+      "id": "wrong-branch",
+      "description": "不同分店不能只凭品牌名匹配",
+      "mode": "rules",
+      "expected_status": "blocked",
+      "actual_status": "blocked",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "blocked",
+        "passed": false,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "high",
+            "type": "真实性",
+            "detail": "「示例餐厅（甲店）」未在提供的同类搜索候选中找到。",
+            "suggestion": "使用真实候选替换，或补充该地点的搜索来源；这不证明地点本身不存在。",
+            "actionable": true,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "evidence": [
+              {
+                "path": "plan.blocks[0]",
+                "value": {
+                  "id": "a",
+                  "name": "示例餐厅（甲店）",
+                  "type": "美食",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "09:00-11:00",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/a"
+                }
+              },
+              {
+                "path": "search.food",
+                "value": [
+                  {
+                    "name": "示例餐厅（乙店）",
+                    "url": "https://example.test/b"
+                  }
+                ]
+              }
+            ]
+          }
+        ],
+        "feedback": "请修复规则发现的严重问题。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 30.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 0,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 0.0
+          }
+        }
+      }
+    },
+    {
+      "id": "source-alias",
+      "description": "仅使用实际来源提供的别名匹配",
+      "mode": "rules",
+      "expected_status": "passed",
+      "actual_status": "passed",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "passed",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [],
+        "feedback": "现有数据范围内规则检查通过。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 30.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 1,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "overnight-train",
+      "description": "跨日列车不误当成同日时间倒置",
+      "mode": "rules",
+      "expected_status": "passed",
+      "actual_status": "passed",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "passed",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [],
+        "feedback": "现有数据范围内规则检查通过。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 60.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 1,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "flight-buffer",
+      "description": "活动结束到航班出发不足项目120分钟预留",
+      "mode": "rules",
+      "expected_status": "blocked",
+      "actual_status": "blocked",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "blocked",
+        "passed": false,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "high",
+            "type": "交通",
+            "detail": "活动与已选班次之间不足以容纳项目规定的进出站预留。",
+            "suggestion": "按当前项目航班120分钟、列车60分钟规则调整活动时间。",
+            "actionable": true,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a",
+              "f"
+            ],
+            "evidence": [
+              {
+                "path": "plan.blocks[0]",
+                "value": {
+                  "id": "a",
+                  "name": "示例博物馆",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "15:00-17:00",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/a"
+                }
+              },
+              {
+                "path": "plan.blocks[1]",
+                "value": {
+                  "id": "f",
+                  "name": "示例航班MU123",
+                  "type": "交通",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "09:00-11:00",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/f",
+                  "flight_no": "MU123",
+                  "dep_time": "2026-10-10T18:00:00",
+                  "arr_time": "2026-10-10T20:00:00"
+                }
+              }
+            ]
+          }
+        ],
+        "feedback": "请修复规则发现的严重问题。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 60.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 1,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "empty-plan",
+      "description": "没有任何活动的方案不能通过",
+      "mode": "rules",
+      "expected_status": "blocked",
+      "actual_status": "blocked",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "blocked",
+        "passed": false,
+        "plan_revision": 1,
+        "reviewed_styles": [],
+        "issues": [
+          {
+            "severity": "high",
+            "type": "完整性",
+            "detail": "方案没有活动，不能作为完整行程通过审核。",
+            "suggestion": "先生成有效行程再审核。",
+            "actionable": false,
+            "source": "rule",
+            "plan_style": null,
+            "day": null,
+            "date": null,
+            "block_ids": [],
+            "evidence": [
+              {
+                "path": "plan",
+                "value": {
+                  "revision": 1,
+                  "destination": "示例城市",
+                  "start_date": "2026-10-10",
+                  "end_date": "2026-10-11",
+                  "blocks": []
+                }
+              }
+            ]
+          }
+        ],
+        "feedback": "请修复规则发现的严重问题。",
+        "rule_summary": {
+          "budget_by_style": {},
+          "grounding": {
+            "named_count": 0,
+            "matched_count": 0,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": null
+          }
+        }
+      }
+    },
+    {
+      "id": "hybrid-rule-preserved",
+      "description": "模型替身返回通过不能覆盖规则超支",
+      "mode": "hybrid_fixture",
+      "expected_status": "blocked",
+      "actual_status": "blocked",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "blocked",
+        "passed": false,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "high",
+            "type": "预算",
+            "detail": "「经典」已知费用120元超过用户总预算100元。",
+            "suggestion": "减少或替换付费项目，按该方案重新核算费用。",
+            "actionable": true,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "evidence": [
+              {
+                "path": "plan.blocks[0].price",
+                "value": 120
+              },
+              {
+                "path": "basic.total_budget",
+                "value": 100
+              }
+            ]
+          }
+        ],
+        "feedback": "存在严重问题，请按定位修正。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 120.0,
+              "budget_status": "over",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 1,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        },
+        "checks": {
+          "rules": "completed",
+          "model": "skipped"
+        }
+      }
+    },
+    {
+      "id": "hybrid-no-issues",
+      "description": "规则无问题且模型替身通过，完整审核通过",
+      "mode": "hybrid_fixture",
+      "expected_status": "passed",
+      "actual_status": "passed",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "passed",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [],
+        "feedback": "规则与模型审核通过。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 30.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 1,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        },
+        "checks": {
+          "rules": "completed",
+          "model": "completed"
+        }
+      }
+    },
+    {
+      "id": "hybrid-explicit-allergy",
+      "description": "模拟模型的明确忌口问题有真实输入依据",
+      "mode": "hybrid_fixture",
+      "expected_status": "blocked",
+      "actual_status": "blocked",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "blocked",
+        "passed": false,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "high",
+            "type": "偏好",
+            "detail": "餐厅菜单与本次明确花生过敏要求冲突",
+            "suggestion": "替换为已有合适候选",
+            "actionable": true,
+            "source": "model",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "evidence": [
+              {
+                "path": "basic.notes",
+                "value": "花生过敏，不能食用花生"
+              },
+              {
+                "path": "search.food[0].ingredients[0]",
+                "value": "花生"
+              }
+            ]
+          }
+        ],
+        "feedback": "存在严重问题，请按定位修正。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 30.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 1,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        },
+        "checks": {
+          "rules": "completed",
+          "model": "completed"
+        }
+      }
+    },
+    {
+      "id": "hybrid-weather-unsupported",
+      "description": "无天气证据的模拟严重判断降为建议",
+      "mode": "hybrid_fixture",
+      "expected_status": "warning",
+      "actual_status": "warning",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [
+        "天气"
+      ],
+      "expected_warning_types": [
+        "天气"
+      ],
+      "audit": {
+        "schema_version": 1,
+        "status": "warning",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "medium",
+            "type": "天气",
+            "detail": "缺少天气数据却声称当天暴雨（缺少实际天气证据，预报缺失不能当作恶劣天气。）",
+            "suggestion": "替换为已有合适候选",
+            "actionable": false,
+            "source": "model",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "evidence": []
+          }
+        ],
+        "feedback": "审核通过；请在出行前核实风险提示。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 30.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 1,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        },
+        "checks": {
+          "rules": "completed",
+          "model": "completed"
+        }
+      }
+    },
+    {
+      "id": "hybrid-model-error",
+      "description": "模拟模型超时保留未知报价规则提示，不能显示通过",
+      "mode": "hybrid_fixture",
+      "expected_status": "error",
+      "actual_status": "error",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [
+        "预算"
+      ],
+      "expected_warning_types": [
+        "预算"
+      ],
+      "audit": {
+        "schema_version": 1,
+        "status": "error",
+        "passed": false,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "medium",
+            "type": "预算",
+            "detail": "「经典」有报价未知项目，已知小计不代表完整总费用。",
+            "suggestion": "预订前核实缺失报价；未知价格不能当作免费。",
+            "actionable": false,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "evidence": [
+              {
+                "path": "plan.blocks[0]",
+                "value": {
+                  "id": "a",
+                  "name": "示例博物馆",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "09:00-11:00",
+                  "price": 30,
+                  "price_known": false,
+                  "link": "https://example.test/a"
+                }
+              }
+            ]
+          }
+        ],
+        "feedback": "模拟模型故障",
+        "error": "模拟模型超时",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 0.0,
+              "budget_status": "unknown",
+              "unknown_count": 1
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 1,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        },
+        "checks": {
+          "rules": "completed",
+          "model": "error"
+        }
+      }
+    },
+    {
+      "id": "hybrid-weather-evidence",
+      "description": "模拟天气风险引用实际预报值，保留严重问题",
+      "mode": "hybrid_fixture",
+      "expected_status": "blocked",
+      "actual_status": "blocked",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "blocked",
+        "passed": false,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "high",
+            "type": "天气",
+            "detail": "暴雨期间安排露天活动",
+            "suggestion": "选择室内候选",
+            "actionable": true,
+            "source": "model",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "evidence": [
+              {
+                "path": "search.weather.days[0].weather",
+                "value": "暴雨"
+              },
+              {
+                "path": "plan.blocks[0].note",
+                "value": "露天活动"
+              }
+            ]
+          }
+        ],
+        "feedback": "存在严重问题，请按定位修正。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 30.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 1,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        },
+        "checks": {
+          "rules": "completed",
+          "model": "completed"
+        }
+      }
+    },
+    {
+      "id": "selected-meal-index-zero",
+      "description": "餐厅第一个选项索引0是有效选择，不误当成未选定",
+      "mode": "rules",
+      "expected_status": "passed",
+      "actual_status": "passed",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "passed",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [],
+        "feedback": "现有数据范围内规则检查通过。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 30.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 1,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "hybrid-unknown-quote-pass",
+      "description": "报价未知但没有其他严重问题，组合审核可以通过并保留提示",
+      "mode": "hybrid_fixture",
+      "expected_status": "warning",
+      "actual_status": "warning",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [
+        "预算"
+      ],
+      "expected_warning_types": [
+        "预算"
+      ],
+      "audit": {
+        "schema_version": 1,
+        "status": "warning",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "medium",
+            "type": "预算",
+            "detail": "「经典」有报价未知项目，已知小计不代表完整总费用。",
+            "suggestion": "预订前核实缺失报价；未知价格不能当作免费。",
+            "actionable": false,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "evidence": [
+              {
+                "path": "plan.blocks[0]",
+                "value": {
+                  "id": "a",
+                  "name": "示例博物馆",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "09:00-11:00",
+                  "price": 0,
+                  "price_known": false,
+                  "link": "https://example.test/a",
+                  "unit_price": null
+                }
+              }
+            ]
+          }
+        ],
+        "feedback": "审核通过；请在出行前核实风险提示。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 0.0,
+              "budget_status": "unknown",
+              "unknown_count": 1
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 1,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        },
+        "checks": {
+          "rules": "completed",
+          "model": "completed"
+        }
+      }
+    },
+    {
+      "id": "hybrid-unknown-quote-not-hard-conflict",
+      "description": "仅因报价缺失的模拟完整性严重问题降为建议，专项上限也不改变这一点",
+      "mode": "hybrid_fixture",
+      "expected_status": "warning",
+      "actual_status": "warning",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [
+        "完整性",
+        "预算"
+      ],
+      "expected_warning_types": [
+        "完整性",
+        "预算"
+      ],
+      "audit": {
+        "schema_version": 1,
+        "status": "warning",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "medium",
+            "type": "预算",
+            "detail": "「经典」有报价未知项目，已知小计不代表完整总费用。",
+            "suggestion": "预订前核实缺失报价；未知价格不能当作免费。",
+            "actionable": false,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "evidence": [
+              {
+                "path": "plan.blocks[0]",
+                "value": {
+                  "id": "a",
+                  "name": "示例博物馆",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "09:00-11:00",
+                  "price": 0,
+                  "price_known": false,
+                  "link": "https://example.test/a",
+                  "unit_price": null
+                }
+              }
+            ]
+          },
+          {
+            "severity": "medium",
+            "type": "完整性",
+            "detail": "景点暂无报价所以不能通过（暂无报价仅需预订前核实，不作为阻断行程的理由。）",
+            "suggestion": "预订前核实报价",
+            "actionable": false,
+            "source": "model",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a"
+            ],
+            "evidence": [
+              {
+                "path": "basic.hard_limits.ticket_price",
+                "value": 20
+              },
+              {
+                "path": "plan.blocks[0].price_known",
+                "value": false
+              },
+              {
+                "path": "plan.blocks[0].unit_price",
+                "value": null
+              }
+            ]
+          }
+        ],
+        "feedback": "审核通过；请在出行前核实风险提示。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 0.0,
+              "budget_status": "unknown",
+              "unknown_count": 1
+            }
+          },
+          "grounding": {
+            "named_count": 1,
+            "matched_count": 1,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        },
+        "checks": {
+          "rules": "completed",
+          "model": "completed"
+        }
+      }
+    },
+    {
+      "id": "city-default-transit-unconfirmed",
+      "description": "40分钟间隔，默认公交45分钟，但未固定交通方式；只核实，不阻断",
+      "mode": "rules",
+      "expected_status": "warning",
+      "actual_status": "warning",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [
+        "交通"
+      ],
+      "expected_warning_types": [
+        "交通"
+      ],
+      "audit": {
+        "schema_version": 1,
+        "status": "warning",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "medium",
+            "type": "交通",
+            "detail": "「示例博物馆」到「示例公园」间隔40分钟，当前公交/地铁路线约46分钟；其他交通方式尚未核实，不能据此认定无法到达。",
+            "suggestion": "可核实驾车或其他可用路线；若坚持当前方式，再调整活动时间。",
+            "actionable": false,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a",
+              "b"
+            ],
+            "evidence": [
+              {
+                "path": "plan.legs[0].duration_s",
+                "value": 2708
+              },
+              {
+                "path": "plan.blocks[0]",
+                "value": {
+                  "id": "a",
+                  "name": "示例博物馆",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "12:00-13:00",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/a"
+                }
+              },
+              {
+                "path": "plan.blocks[1]",
+                "value": {
+                  "id": "b",
+                  "name": "示例公园",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "13:40-14:10",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/b"
+                }
+              },
+              {
+                "path": "plan.legs[0].mode",
+                "value": "transit"
+              }
+            ]
+          }
+        ],
+        "feedback": "规则未发现严重冲突；未知信息和风险提示仍需核实。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 60.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 2,
+            "matched_count": 2,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "city-driving-fits",
+      "description": "40分钟间隔，已核实驾车约14分钟，不能附加进出站预留",
+      "mode": "rules",
+      "expected_status": "passed",
+      "actual_status": "passed",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "passed",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [],
+        "feedback": "现有数据范围内规则检查通过。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 60.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 2,
+            "matched_count": 2,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "city-known-alternative-fits",
+      "description": "默认公交偏慢，但已有真实驾车备选能容纳转场",
+      "mode": "rules",
+      "expected_status": "passed",
+      "actual_status": "passed",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "passed",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [],
+        "feedback": "现有数据范围内规则检查通过。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 60.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 2,
+            "matched_count": 2,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "city-fixed-transit-conflict",
+      "description": "固定采用公交，即使驾车更快也不能放过真实不足",
+      "mode": "rules",
+      "expected_status": "blocked",
+      "actual_status": "blocked",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "blocked",
+        "passed": false,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "high",
+            "type": "交通",
+            "detail": "「示例博物馆」到「示例公园」间隔40分钟，公交/地铁路线约46分钟，当前路线耗时超出可用间隔。",
+            "suggestion": "提前结束前一活动或推迟后一活动，保留实际转场所需时间。",
+            "actionable": true,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a",
+              "b"
+            ],
+            "evidence": [
+              {
+                "path": "plan.legs[0].duration_s",
+                "value": 2708
+              },
+              {
+                "path": "plan.blocks[0]",
+                "value": {
+                  "id": "a",
+                  "name": "示例博物馆",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "12:00-13:00",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/a"
+                }
+              },
+              {
+                "path": "plan.blocks[1]",
+                "value": {
+                  "id": "b",
+                  "name": "示例公园",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "13:40-14:10",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/b"
+                }
+              },
+              {
+                "path": "plan.legs[0].mode",
+                "value": "transit"
+              },
+              {
+                "path": "plan.legs[0].mode_locked",
+                "value": true
+              },
+              {
+                "path": "plan.legs[0].alternatives[0].mode",
+                "value": "drive"
+              },
+              {
+                "path": "plan.legs[0].alternatives[0].duration_s",
+                "value": 848
+              }
+            ]
+          }
+        ],
+        "feedback": "请修复规则发现的严重问题。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 60.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 2,
+            "matched_count": 2,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "city-driving-too-short",
+      "description": "仅10分钟间隔，驾车也需约14分钟，保留真实严重冲突",
+      "mode": "rules",
+      "expected_status": "blocked",
+      "actual_status": "blocked",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [],
+      "expected_warning_types": [],
+      "audit": {
+        "schema_version": 1,
+        "status": "blocked",
+        "passed": false,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "high",
+            "type": "交通",
+            "detail": "「示例博物馆」到「示例公园」间隔10分钟，驾车/打车路线约15分钟，当前路线耗时超出可用间隔。",
+            "suggestion": "提前结束前一活动或推迟后一活动，保留实际转场所需时间。",
+            "actionable": true,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a",
+              "b"
+            ],
+            "evidence": [
+              {
+                "path": "plan.legs[0].duration_s",
+                "value": 848
+              },
+              {
+                "path": "plan.blocks[0]",
+                "value": {
+                  "id": "a",
+                  "name": "示例博物馆",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "12:00-13:00",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/a"
+                }
+              },
+              {
+                "path": "plan.blocks[1]",
+                "value": {
+                  "id": "b",
+                  "name": "示例公园",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "13:10-14:10",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/b"
+                }
+              },
+              {
+                "path": "plan.legs[0].mode",
+                "value": "drive"
+              }
+            ]
+          }
+        ],
+        "feedback": "请修复规则发现的严重问题。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 60.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 2,
+            "matched_count": 2,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        }
+      }
+    },
+    {
+      "id": "model-city-mode-false-block",
+      "description": "模型不能把未固定的市内公交方式加上进出站缓冲重新判high",
+      "mode": "hybrid_fixture",
+      "expected_status": "warning",
+      "actual_status": "warning",
+      "ok": true,
+      "extra_high_count": 0,
+      "missing_high_count": 0,
+      "warning_types": [
+        "交通"
+      ],
+      "expected_warning_types": [
+        "交通"
+      ],
+      "audit": {
+        "schema_version": 1,
+        "status": "warning",
+        "passed": true,
+        "plan_revision": 1,
+        "reviewed_styles": [
+          "经典"
+        ],
+        "issues": [
+          {
+            "severity": "medium",
+            "type": "交通",
+            "detail": "「示例博物馆」到「示例公园」间隔40分钟，当前公交/地铁路线约46分钟；其他交通方式尚未核实，不能据此认定无法到达。",
+            "suggestion": "可核实驾车或其他可用路线；若坚持当前方式，再调整活动时间。",
+            "actionable": false,
+            "source": "rule",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a",
+              "b"
+            ],
+            "evidence": [
+              {
+                "path": "plan.legs[0].duration_s",
+                "value": 2708
+              },
+              {
+                "path": "plan.blocks[0]",
+                "value": {
+                  "id": "a",
+                  "name": "示例博物馆",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "12:00-13:00",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/a"
+                }
+              },
+              {
+                "path": "plan.blocks[1]",
+                "value": {
+                  "id": "b",
+                  "name": "示例公园",
+                  "type": "景点",
+                  "plan_style": "经典",
+                  "day": 1,
+                  "date": "2026-10-10",
+                  "time": "13:40-14:10",
+                  "price": 30,
+                  "price_known": true,
+                  "link": "https://example.test/b"
+                }
+              },
+              {
+                "path": "plan.legs[0].mode",
+                "value": "transit"
+              }
+            ]
+          },
+          {
+            "severity": "medium",
+            "type": "交通",
+            "detail": "间隔不足以容纳公交及进出站预留（市内路线已有可行方式或其他方式尚未核实，不能仅按默认方式判定无法到达。）",
+            "suggestion": "重新安排行程",
+            "actionable": false,
+            "source": "model",
+            "plan_style": "经典",
+            "day": 1,
+            "date": "2026-10-10",
+            "block_ids": [
+              "a",
+              "b"
+            ],
+            "evidence": [
+              {
+                "path": "plan.legs[0].duration_s",
+                "value": 2708
+              }
+            ]
+          }
+        ],
+        "feedback": "审核通过；请在出行前核实风险提示。",
+        "rule_summary": {
+          "budget_by_style": {
+            "经典": {
+              "known_cost": 60.0,
+              "budget_status": "ok",
+              "unknown_count": 0
+            }
+          },
+          "grounding": {
+            "named_count": 2,
+            "matched_count": 2,
+            "unavailable_count": 0,
+            "ambiguous_count": 0,
+            "coverage": 1.0
+          }
+        },
+        "checks": {
+          "rules": "completed",
+          "model": "completed"
+        }
+      }
+    }
+  ]
+}

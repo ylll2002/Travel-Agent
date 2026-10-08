@@ -6,6 +6,7 @@ import re
 import signal
 import importlib.util
 import subprocess
+import sys
 from datetime import date, timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -15,12 +16,18 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 ROOT = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(ROOT))
+from shared.audit import failed_audit, history_entry, next_plan_revision, normalize_audit, without_review
+from shared.sources import merge_plan_sources
+
 ORCHESTRATOR_PY = ROOT / "Orchestrator" / "orchestrator.py"
 ORCHESTRATOR_PYTHON = ROOT / "Orchestrator" / ".venv" / "bin" / "python"
 SEARCH_PY = ROOT / "SearchAgent" / "search.py"
 SEARCH_PYTHON = ROOT / "SearchAgent" / ".venv" / "bin" / "python"
 PLAN_PY = ROOT / "PlanAgent" / "plan.py"
 PLAN_PYTHON = ROOT / "PlanAgent" / ".venv" / "bin" / "python"
+VALIDATE_PY = ROOT / "ValidateAgent" / "validate.py"
+VALIDATE_PYTHON = ROOT / "ValidateAgent" / ".venv" / "bin" / "python"
 
 router = APIRouter(prefix="/plan", tags=["plan"])
 
@@ -39,6 +46,8 @@ class PlanRequest(BaseModel):
     start_date: str | None = None
     end_date: str | None = None
     profile: dict | None = None
+    preferences: dict | None = None
+    recent_trips: list | None = None
     basic: dict | None = None
     plan: dict | None = None
     search: dict | None = None
@@ -92,7 +101,8 @@ def _request_context(payload: PlanRequest) -> tuple[str, str, str, dict]:
             raise ValueError
     except (ValueError, TypeError):
         raise HTTPException(status_code=422, detail="行程日期无效，结束日期不能早于出发日期") from None
-    basic = dict(payload.basic or {})
+    previous_basic = (payload.plan or {}).get("basic")
+    basic = {**(previous_basic if isinstance(previous_basic, dict) else {}), **(payload.basic or {})}
     for source, target in (("origin", "origin"), ("travelers", "travelers"), ("budget", "total_budget"), ("purposes", "purposes")):
         if parsed.get(source) and not basic.get(target):
             basic[target] = parsed[source]
@@ -101,7 +111,7 @@ def _request_context(payload: PlanRequest) -> tuple[str, str, str, dict]:
 
 def _plan_data(payload: PlanRequest, destination: str, start_date: str, end_date: str, basic: dict) -> dict:
     data: dict = {"destination": destination, "start_date": start_date, "end_date": end_date}
-    for name in ("user_id", "profile"):
+    for name in ("user_id", "profile", "preferences", "recent_trips"):
         value = getattr(payload, name)
         if value:
             data[name] = value
@@ -137,7 +147,7 @@ def _blocks_to_plan(blocks: list, destination: str, start_date: str, end_date: s
             itinerary.append({"day": day, "date": date_, "theme": "", "hotel": "", "schedule": schedule,
                               **({"activity_window": window} if window is not None else {})})
         plans.append({"style": style, "summary": summaries.get(style, ""), "itinerary": itinerary})
-    return {**(metadata or {}), "destination": destination, "start_date": start_date, "end_date": end_date, "plans": plans, "blocks": copy.deepcopy(blocks)}
+    return {**without_review(metadata), "destination": destination, "start_date": start_date, "end_date": end_date, "plans": plans, "blocks": copy.deepcopy(blocks)}
 
 
 def _search_context(destination: str, start_date: str, end_date: str, basic: dict | None, profile: dict | None) -> dict:
@@ -197,21 +207,50 @@ def _merge_modified_blocks(result: dict, full_blocks: list, target_ids: set[str]
     return {**result, "blocks": merged}
 
 
-def _finalize_blocks(blocks: list, destination: str, start_date: str, end_date: str, basic: dict, profile: dict | None, refresh_food: bool = False, search_result: dict | None = None, metadata: dict | None = None, refresh_targets: list | None = None) -> dict:
-    result = _run_json(PLAN_PYTHON, PLAN_PY, {
-        "finalize": True,
-        "plan": _blocks_to_plan(blocks, destination, start_date, end_date, metadata),
-        "search": search_result or {"destination": destination},
-        "basic": basic,
-        "profile": profile,
-        "refresh_food": refresh_food,
-        "refresh_food_targets": refresh_targets or [],
-    }, timeout=300)
-    if not result.get("error") and isinstance(search_result, dict):
-        result["search"] = {**search_result, "destination": destination,
-            "start_date": start_date, "end_date": end_date,
-            **{key: result[key] for key in ("food", "food_by_anchor") if isinstance(result.get(key), list)}}
+def _review_modified_plan(plan: dict, search: dict, basic: dict, profile: dict | None,
+                          preferences: dict | None = None, recent_trips: list | None = None) -> dict:
+    """Review the final snapshot once, preserving an explicit user edit even if blocked."""
+    result = without_review(plan)
+    result["search"] = merge_plan_sources(search, result)
+    reviewed = {key: value for key, value in result.items() if key not in ("search", "review_context")}
+    raw = _run_json(VALIDATE_PYTHON, VALIDATE_PY, {
+        "plan": reviewed, "search": result["search"], "basic": basic, "profile": profile,
+        "preferences": preferences, "recent_trips": recent_trips,
+    }, timeout=110)
+    try:
+        # Do not re-label an old response as a review of this new version.
+        if type(raw.get("plan_revision")) is not int or raw["plan_revision"] != result["revision"]:
+            raise ValueError("review version mismatch")
+        audit = normalize_audit(raw, reviewed, source="mixed")
+    except (AttributeError, ValueError, TypeError):
+        audit = failed_audit("当前行程的审核未能完成", "行程已保留，当前版本需要重新审核；旧审核结论不能替代本次结果。", reviewed)
+    result.update(audit=audit, passed=audit["passed"], history=[history_entry(1, audit)],
+                  review_context={"profile": profile, "preferences": preferences, "recent_trips": recent_trips})
     return result
+
+
+def _finalize_blocks(blocks: list, destination: str, start_date: str, end_date: str, basic: dict,
+                     profile: dict | None, refresh_food: bool = False, search_result: dict | None = None,
+                     metadata: dict | None = None, refresh_targets: list | None = None,
+                     preferences: dict | None = None, recent_trips: list | None = None) -> dict:
+    revision = next_plan_revision(metadata)
+    draft = _blocks_to_plan(blocks, destination, start_date, end_date, metadata)
+    draft.update(revision=revision, basic=copy.deepcopy(basic))
+    result = _run_json(PLAN_PYTHON, PLAN_PY, {
+        "finalize": True, "plan": draft,
+        "search": search_result or {"destination": destination},
+        "basic": basic, "profile": profile,
+        "refresh_food": refresh_food, "refresh_food_targets": refresh_targets or [],
+    }, timeout=300)
+    if result.get("error"):
+        return {"error": result["error"]}
+    if not isinstance(result.get("blocks"), list):
+        return {"error": "调整没有返回有效行程，请重试"}
+    result = without_review(result)
+    result.update(revision=revision, basic=copy.deepcopy(basic))
+    snapshot = {**(search_result or {}), "destination": destination,
+                "start_date": start_date, "end_date": end_date}
+    return _review_modified_plan(result, snapshot, basic, profile, preferences, recent_trips)
 
 
 def _validated_blocks(value, allow_empty: bool = False) -> list[dict]:
@@ -493,13 +532,16 @@ def plan_stream(payload: PlanRequest):
     """断开连接时立即清理 Orchestrator 及其模型/搜索子进程。"""
     destination, start_date, end_date, basic = _request_context(payload)
     data = _plan_data(payload, destination, start_date, end_date, basic)
+    return _orchestrator_stream(data)
 
+
+def _orchestrator_stream(data: dict, repair=False):
     async def event_stream():
         proc = None
         stderr_task = None
         try:
             proc = await asyncio.create_subprocess_exec(
-                str(ORCHESTRATOR_PYTHON), str(ORCHESTRATOR_PY), "--stream",
+                str(ORCHESTRATOR_PYTHON), str(ORCHESTRATOR_PY), "--stream", *(["--repair"] if repair else []),
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 env=_subprocess_env(), start_new_session=True, limit=4 * 1024 * 1024,
             )
@@ -580,6 +622,58 @@ def _merge_style_blocks(original: list[dict], replacement: list[dict], style: st
     return merged
 
 
+
+@router.post("/repair/stream")
+def repair_stream(payload: PlanRequest):
+    """Recheck the stored snapshot, then repair only verified actionable failures."""
+    plan = copy.deepcopy(payload.plan or {})
+    if type(plan.get("revision")) is not int or plan["revision"] < 1 or payload.modify is not None:
+        raise HTTPException(status_code=422, detail="请提供当前完整行程，自动修复不接受额外修改指令")
+    _validated_blocks(plan.get("blocks"), allow_empty=True)
+    basic = plan.get("basic") or {}
+    if not isinstance(basic, dict) or (payload.basic is not None and payload.basic != basic):
+        raise HTTPException(status_code=422, detail="旅行需求已变化，请先更新行程")
+    for key in ("destination", "start_date", "end_date"):
+        if getattr(payload, key) not in (None, plan.get(key)):
+            raise HTTPException(status_code=422, detail="行程信息已变化，请先更新行程")
+    destination, start_date, end_date, basic = _request_context(PlanRequest(
+        destination=plan.get("destination"), start_date=plan.get("start_date"), end_date=plan.get("end_date"), basic=basic))
+    context = plan.get("review_context") or {}
+    if not isinstance(context, dict):
+        context = {}
+    data = {"destination": destination, "start_date": start_date, "end_date": end_date, "basic": basic,
+            "plan": _blocks_to_plan(plan["blocks"], destination, start_date, end_date, plan),
+            "search": payload.search or {}}
+    for key in ("profile", "preferences", "recent_trips"):
+        data[key] = getattr(payload, key) if getattr(payload, key) is not None else context.get(key)
+    return _orchestrator_stream(data, repair=True)
+
+
+@router.post("/review")
+def review_plan(payload: PlanRequest) -> dict:
+    """Retry the same snapshot without generating, changing or finalizing a plan."""
+    plan = copy.deepcopy(payload.plan or {})
+    if type(plan.get("revision")) is not int or plan["revision"] < 1 or payload.modify is not None:
+        raise HTTPException(status_code=422, detail="请提供当前有效版本的完整行程；审核不接受修改指令")
+    _validated_blocks(plan.get("blocks"), allow_empty=True)
+    # A retry uses the stored plan's dates and constraints, not a hidden edit.
+    for key in ("destination", "start_date", "end_date"):
+        if getattr(payload, key) not in (None, plan.get(key)):
+            raise HTTPException(status_code=422, detail="行程信息已变化，请通过修改行程重新审核")
+    stored_basic = plan.get("basic") if plan.get("basic") is not None else {}
+    if not isinstance(stored_basic, dict) or (payload.basic is not None and payload.basic != stored_basic):
+        raise HTTPException(status_code=422, detail="旅行需求已变化，请通过修改行程重新审核")
+    _request_context(PlanRequest(destination=plan.get("destination"), start_date=plan.get("start_date"),
+                                 end_date=plan.get("end_date"), basic=stored_basic))
+    context = plan.get("review_context") or {}
+    if not isinstance(context, dict):
+        context = {}
+    return _review_modified_plan(plan, payload.search or {}, stored_basic,
+        payload.profile if payload.profile is not None else context.get("profile"),
+        payload.preferences if payload.preferences is not None else context.get("preferences"),
+        payload.recent_trips if payload.recent_trips is not None else context.get("recent_trips"))
+
+
 @router.post("")
 def create_plan(payload: PlanRequest) -> dict:
     destination, start_date, end_date, basic = _request_context(payload)
@@ -600,7 +694,8 @@ def create_plan(payload: PlanRequest) -> dict:
     def finalize(updated: list, affected: list, refresh_food: bool = False, search: dict | None = None, metadata: dict | None = None):
         return _finalize_blocks(updated, destination, start_date, end_date, basic, payload.profile,
             refresh_food=refresh_food, search_result=search if search is not None else payload.search,
-            metadata=metadata or payload.plan, refresh_targets=_affected_days(affected))
+            metadata=metadata or payload.plan, refresh_targets=_affected_days(affected),
+            preferences=payload.preferences, recent_trips=payload.recent_trips)
 
     if action == "add":
         selected = _select_targets(scoped, modify)

@@ -16,6 +16,7 @@ export function usePlanStream() {
     async (
       payload: Record<string, unknown>,
       onEvent: (event: PlanStreamEvent) => void,
+      path: "/plan/stream" | "/plan/repair/stream" = "/plan/stream",
     ) => {
       controllerRef.current?.abort();
       const controller = new AbortController();
@@ -23,7 +24,7 @@ export function usePlanStream() {
       setStreaming(true);
 
       try {
-        const response = await fetch(`${API_BASE_URL}/plan/stream`, {
+        const response = await fetch(`${API_BASE_URL}${path}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -70,6 +71,7 @@ export function usePlanStream() {
             } catch {
               continue;
             }
+            if (controller.signal.aborted || controllerRef.current !== controller) return;
             if (parsed.type === 'final') {
               completed = true;
               onEvent({ type: 'final', data: parsed.data ?? {} });
@@ -87,7 +89,7 @@ export function usePlanStream() {
           onEvent({ type: 'error', error: (error as Error).message });
         }
       } finally {
-        setStreaming(false);
+        if (controllerRef.current === controller) setStreaming(false);
       }
     },
     [],

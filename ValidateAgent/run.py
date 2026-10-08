@@ -1,20 +1,30 @@
 """ValidateAgent 审核循环：PlanAgent 生成 → 审核 → 不过则退回修改，直到通过或达到最大轮数。"""
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
-import validate
+if __package__:
+    from . import validate
+else:
+    import validate
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT = BASE_DIR.parent
+sys.path.insert(0, str(ROOT))
+from shared.audit import failed_audit, history_entry, next_plan_revision, normalize_audit, repair_feedback, without_review
+from shared.sources import merge_plan_sources
+
 PLAN_PY = ROOT / "PlanAgent" / "plan.py"
-PLAN_PYTHON = ROOT / "PlanAgent" / ".venv" / "bin" / "python"
+PLAN_PYTHON = ROOT / "PlanAgent" / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 
 
 def generate_plan(context: dict, feedback: str | None = None) -> dict:
     payload = dict(context)
+    if isinstance(payload.get("plan"), dict):
+        payload["plan"] = without_review(payload["plan"])
     if feedback:
         payload["feedback"] = feedback
     proc = subprocess.run(
@@ -24,44 +34,62 @@ def generate_plan(context: dict, feedback: str | None = None) -> dict:
         text=True,
         timeout=300,
     )
+    if proc.returncode:
+        return {"error": "PlanAgent执行失败，请检查服务日志"}
     try:
         return json.loads(proc.stdout)
     except json.JSONDecodeError:
-        return {"error": (proc.stdout or proc.stderr).strip()}
+        return {"error": "PlanAgent未返回有效JSON"}
 
 
 def run_loop(context: dict, max_iterations: int = 2) -> dict:
+    if not isinstance(context, dict):
+        raise ValueError("规划上下文必须是JSON对象")
+    if type(max_iterations) is not int or not 1 <= max_iterations <= 2:
+        raise ValueError("审核循环仅允许1至2轮")
+    context = dict(context)  # Do not mutate caller input when carrying supplemental sources.
+    if context.get("basic") is None and isinstance(context.get("plan"), dict):
+        basic = context["plan"].get("basic")
+        if isinstance(basic, dict):
+            context["basic"] = dict(basic)
     history: list[dict] = []
-    feedback: str | None = None
-    plan: dict | None = None
+    feedback = None
+    plan = None
+    previous = context.get("plan")
     for i in range(1, max_iterations + 1):
-        plan = generate_plan(context, feedback)
+        try:
+            plan = generate_plan(context, feedback)
+        except (OSError, subprocess.TimeoutExpired):
+            plan = {"error": "规划服务不可用或超时"}
         if not isinstance(plan, dict) or "error" in plan:
-            return {"passed": False, "plan": plan, "history": history}
-
-        audit = validate.validate_plan(
-            plan,
-            context.get("profile"),
-            context.get("search"),
-            context.get("basic"),
-        )
-        history.append(
-            {
-                "iteration": i,
-                "passed": audit.get("passed"),
-                "issues": audit.get("issues"),
-            }
-        )
-        if audit.get("passed"):
-            return {"passed": True, "plan": plan, "history": history}
-        feedback = audit.get("feedback") or "请修正上述问题"
-
-    return {
-        "passed": False,
-        "plan": plan,
-        "history": history,
-        "final_feedback": feedback,
-    }
+            audit = failed_audit("规划失败", "未生成有效方案，无法审核")
+        else:
+            plan = without_review(plan)
+            plan["revision"] = next_plan_revision(previous)
+            previous = plan
+            if context.get("modify") and isinstance(plan.get("basic"), dict):
+                context["basic"] = dict(plan["basic"])
+            context["search"] = merge_plan_sources(context.get("search"), plan)
+            try:
+                raw_audit = validate.validate_plan(
+                    plan=plan,
+                    profile=context.get("profile"),
+                    preferences=context.get("preferences"),
+                    recent_trips=context.get("recent_trips"),
+                    search=context.get("search"),
+                    basic=context.get("basic"),
+                )
+                if isinstance(raw_audit, dict) and "plan_revision" in raw_audit:
+                    if type(raw_audit["plan_revision"]) is not int or raw_audit["plan_revision"] != plan["revision"]:
+                        raise ValueError("review version mismatch")
+                audit = normalize_audit(raw_audit, plan, source="mixed")
+            except (ValueError, TypeError):
+                audit = failed_audit("审核结果不可用", "审核未返回有效结论", plan)
+        history.append(history_entry(i, audit))
+        feedback = repair_feedback(audit)
+        if context.get("modify") or audit["passed"] or feedback is None or i == max_iterations:
+            return {"passed": audit["passed"], "plan": plan, "audit": audit,
+                    "history": history, "final_feedback": audit["feedback"]}
 
 
 def main() -> None:
@@ -70,13 +98,13 @@ def main() -> None:
     else:
         raw = " ".join(sys.argv[1:]).strip()
     if not raw:
-        print(json.dumps({"error": "empty input"}, ensure_ascii=False))
+        print(json.dumps({"passed": False, "plan": None, "audit": failed_audit("empty input", "请提供规划上下文"), "history": []}, ensure_ascii=False))
         return
     try:
         context = json.loads(raw)
         result = run_loop(context)
-    except Exception as exc:  # noqa: BLE001
-        result = {"error": str(exc)}
+    except Exception:  # noqa: BLE001
+        result = {"passed": False, "plan": None, "audit": failed_audit("审核循环失败", "请检查输入及服务配置"), "history": []}
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 

@@ -5720,6 +5720,13 @@ button:disabled {
 .ta-review-evidence span { display: block; white-space: pre-wrap; }
 .ta-plan-block.ta-review-highlight { outline: 3px solid #d38a1b; outline-offset: -3px; background: #fff6df; }
 .ta-review-confirm-hint { margin: 6px 0 0; font-size: 12px; color: #8a4024; }
+.ta-city-guide { margin: 16px 0; padding: 20px; border: 1px solid #dce8f3; border-radius: 18px; background: linear-gradient(145deg, #fff, #f0f8ff); color: #20364b; }
+.ta-city-guide > strong { display: block; font-size: 16px; }
+.ta-generation-track { height: 6px; overflow: hidden; margin: 12px 0 8px; border-radius: 9px; background: #dfebf5; }
+.ta-generation-track > span { display: block; height: 100%; border-radius: inherit; background: #2585da; transition: width .5s ease; }
+.ta-city-guide small { color: #60788e; font-size: 11px; }
+.ta-city-guide h3 { margin: 20px 0 12px; font-size: 18px; }
+.ta-city-guide-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.85; font-size: 14px; }
 
 
 .ta-plan-column > .ta-plan-detail { flex: 1 1 0; height: auto; }

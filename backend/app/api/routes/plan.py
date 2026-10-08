@@ -535,13 +535,21 @@ def plan_stream(payload: PlanRequest):
     return _orchestrator_stream(data)
 
 
-def _orchestrator_stream(data: dict, repair=False):
+@router.post("/guide/stream")
+def city_guide_stream(payload: PlanRequest):
+    if not payload.destination or not payload.destination.strip():
+        raise HTTPException(status_code=422, detail="缺少目的地")
+    return _orchestrator_stream({"destination": payload.destination}, guide=True)
+
+
+def _orchestrator_stream(data: dict, repair=False, guide=False):
     async def event_stream():
         proc = None
         stderr_task = None
         try:
             proc = await asyncio.create_subprocess_exec(
-                str(ORCHESTRATOR_PYTHON), str(ORCHESTRATOR_PY), "--stream", *(["--repair"] if repair else []),
+                *([str(SEARCH_PYTHON), str(SEARCH_PY), "--guide-stream"] if guide else
+                  [str(ORCHESTRATOR_PYTHON), str(ORCHESTRATOR_PY), "--stream", *(["--repair"] if repair else [])]),
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
                 env=_subprocess_env(), start_new_session=True, limit=4 * 1024 * 1024,
             )

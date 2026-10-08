@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { usePlanStream } from '../hooks/usePlanStream';
 
 export default function CityGuide({ destination, progress, status }: {
@@ -6,8 +6,6 @@ export default function CityGuide({ destination, progress, status }: {
 }) {
   const [text, setText] = useState('');
   const [error, setError] = useState('');
-  const sectionRef = useRef<HTMLElement>(null);
-  useEffect(() => { sectionRef.current?.scrollIntoView({ block:'nearest', behavior:'smooth' }); }, []);
   const { start, stop, streaming } = usePlanStream();
   useEffect(() => {
     void start({ destination }, event => {
@@ -19,7 +17,7 @@ export default function CityGuide({ destination, progress, status }: {
     return stop;
   }, [destination, start, stop]);
   useEffect(() => { if (status !== 'running') stop(); }, [status, stop]);
-  return <section ref={sectionRef} className="ta-city-guide" aria-label={`${destination}旅行导览`}>
+  return <section className="ta-city-guide" aria-label={`${destination}旅行导览`}>
     <strong aria-live="polite">{status === 'running' ? '线路正在生成中' : status === 'complete' ? '线路生成完成' : '线路生成已停止'}…（{progress}%）</strong>
     <div className="ta-generation-track" role="progressbar" aria-label="行程生成预计进度"
       aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
@@ -27,7 +25,7 @@ export default function CityGuide({ destination, progress, status }: {
     </div>
     <small>预计进度 · 城市介绍仅供浏览，具体安排以生成的行程为准</small>
     <h3>✈️ {destination}旅行导览</h3>
-    <div className="ta-city-guide-text">{text || (streaming ? '正在了解这座城市…' : error || '城市导览已停止。')}</div>
+    <div className="ta-city-guide-text" tabIndex={0} aria-label="城市介绍">{text || (streaming ? '正在了解这座城市…' : error || '城市导览已停止。')}</div>
     {text && error && <small>{error}</small>}
   </section>;
 }

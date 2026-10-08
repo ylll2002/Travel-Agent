@@ -15,12 +15,18 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import BehaviorSignal, MemoryCache, TripMemory, UserPreference
+import sys
 
 ROOT = Path(__file__).resolve().parents[3]
+
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from agent_env import component_python
 CONVERSATION_SUMMARY_PY = ROOT / "PlanAgent" / "conversation_summary.py"
 PLAN_SUMMARY_PY = ROOT / "PlanAgent" / "plan_summary.py"
 TRIP_SUMMARY_PY = ROOT / "PlanAgent" / "trip_summary.py"
-PLAN_PYTHON = ROOT / "PlanAgent" / ".venv" / "bin" / "python"
+PLAN_PYTHON = component_python("PlanAgent")
 
 POSITIVE_ACTIONS = {
     "add",
@@ -249,6 +255,8 @@ def _summarize_conversation(conversation: list) -> dict:
             input=json.dumps({"conversation": conversation}, ensure_ascii=False),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=60,
             env=env,
         )
@@ -290,6 +298,8 @@ def _summarize_plan(plan: dict) -> dict:
             input=json.dumps({"plan": plan}, ensure_ascii=False),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=90,
             env=env,
         )
@@ -344,6 +354,8 @@ def _summarize_recent_trips(recent_trips: list[dict]) -> str:
                 ),
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=90,
                 env=env,
             )

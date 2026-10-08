@@ -41,6 +41,42 @@ class QuestionResponseTests(unittest.TestCase):
         self.assertEqual(client.max_retries, 0)
         self.assertEqual(self.payload["trip_data"], PREVIOUS)
 
+    def test_deepseek_flash_disables_thinking_for_json_and_schema_correction(self):
+        client = self.client(["{broken", VALID])
+        with patch.dict("agent.os.environ", {
+            "OPENAI_MODEL": "deepseek-v4-flash-0731",
+            "OPENAI_BASE_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        }):
+            result = resolve_intent(self.payload, client)
+        self.assertEqual(result["action"], "confirm_trip")
+        self.assertEqual(result["data"]["destination"], PREVIOUS["destination"])
+        self.assertEqual(client.chat.completions.create.call_count, 2)
+        for call in client.chat.completions.create.call_args_list:
+            self.assertEqual(call.kwargs["model"], "deepseek-v4-flash-0731")
+            self.assertEqual(call.kwargs["extra_body"], {"enable_thinking": False})
+            self.assertEqual(call.kwargs["response_format"], {"type": "json_object"})
+        self.assertEqual(self.payload["trip_data"], PREVIOUS)
+
+    def test_qwen_still_disables_thinking_for_json(self):
+        client = self.client([VALID])
+        with patch.dict("agent.os.environ", {"OPENAI_MODEL": "qwen3.8-max"}):
+            result = resolve_intent(self.payload, client)
+        self.assertEqual(result["action"], "confirm_trip")
+        kwargs = client.chat.completions.create.call_args.kwargs
+        self.assertEqual(kwargs["model"], "qwen3.8-max")
+        self.assertEqual(kwargs["extra_body"], {"enable_thinking": False})
+        self.assertEqual(kwargs["response_format"], {"type": "json_object"})
+
+    def test_deepseek_flash_missing_key_preserves_trip_without_model_call(self):
+        with patch.dict("agent.os.environ", {
+            "OPENAI_MODEL": "deepseek-v4-flash-0731", "OPENAI_API_KEY": "",
+        }, clear=True), patch("agent.OpenAI") as constructor:
+            result = resolve_intent(self.payload)
+        self.assertIn("未配置模型 API Key", result["error"])
+        self.assertEqual(result["data"], PREVIOUS)
+        self.assertEqual(self.payload["trip_data"], PREVIOUS)
+        constructor.assert_not_called()
+
     def test_unique_object_array_is_unwrapped_without_retry(self):
         client = self.client([[VALID]])
         result = resolve_intent(self.payload, client)

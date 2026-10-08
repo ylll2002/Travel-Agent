@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties, KeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
+import type { KeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { api } from '../api/client';
 import { TripMap } from '../components/TripMap';
 import type { RouteBlock, RouteLeg } from '../components/TripMap';
@@ -10,6 +10,25 @@ import { advanceReviewProgress, canAutoRepair, confirmationReason, currentAudit,
 import CityGuide from '../components/CityGuide';
 import { PlanReviewWindow } from '../components/PlanReviewWindow';
 import type { AuditIssue, PlanAudit, ReviewContext, ReviewProgress } from '../lib/planReview';
+
+// Compact map size follows the final responsive rules in index.css.
+// Recompute on opening so the map always starts at the bottom-right.
+function getMapDockPosition() {
+  if (typeof window === 'undefined') return { x: 760, y: 520 };
+
+  const mobile = window.innerWidth <= 760;
+  const width = Math.min(mobile ? 340 : 360, window.innerWidth - (mobile ? 24 : 32));
+  const height = mobile
+    ? Math.min(292, window.innerHeight - 84)
+    : window.innerHeight <= 760
+      ? Math.min(300, window.innerHeight - 88)
+      : Math.min(318, window.innerHeight - 96);
+
+  return {
+    x: Math.max(12, window.innerWidth - width - 24),
+    y: Math.max(68, window.innerHeight - height - 10),
+  };
+}
 
 type ChatMessage = {
   id: string;
@@ -500,19 +519,10 @@ export function AgentPage() {
     return () => window.clearInterval(timer);
   }, [planning]);
   const [reviewProgress, setReviewProgress] = useState<ReviewProgress | null>(null);
-  const [mapPosition, setMapPosition] = useState(() => {
-    if (typeof window === 'undefined') return { x: 760, y: 520 };
-
-    const defaultWidth = Math.min(360, window.innerWidth - 32);
-    const defaultHeight = Math.min(318, window.innerHeight - 96);
-
-    return {
-      x: Math.max(12, window.innerWidth - defaultWidth - 24),
-      y: Math.max(68, window.innerHeight - defaultHeight - 10),
-    };
-  });
+  const [mapPosition, setMapPosition] = useState(getMapDockPosition);
   const [isMapExpanded, setIsMapExpanded] = useState(false);
-  const [isMapHidden, setIsMapHidden] = useState(false);
+  // Both floating windows start folded, as small tabs at the right edge.
+  const [isMapHidden, setIsMapHidden] = useState(true);
   const mapDragRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
   const { start: startPlanStream, stop: stopPlanStream } = usePlanStream();
 
@@ -710,6 +720,9 @@ export function AgentPage() {
       unpriced_items: plan.unpriced_items as RoutePlan['unpriced_items'], suggestions: plan.suggestions as PlanSuggestions | undefined,
     };
     setRoutePlan(snapshot);
+    // Open the generated itinerary immediately; the old cover/selection screen is no longer needed.
+    setExpandedStyle(previous => previous && snapshot.styles.includes(previous)
+      ? previous : snapshot.styles[0] ?? null);
     setConfirmedStyle(null);
     setSaveState('idle');
     if (raw.search && typeof raw.search === 'object') {
@@ -765,7 +778,6 @@ export function AgentPage() {
     setPlanning(true);
     setReviewProgress(advanceReviewProgress(null, {stage:'planning',repair_count:0}));
     setRoutePlan(previous => previous ? {...previous,audit:null,review_pending:true} : previous);
-    setExpandedStyle(null);
     setSelectedBlocks(new Set());
     await startPlanStream(payload, event => {
       if (version !== planRequestVersionRef.current) return;
@@ -1565,7 +1577,7 @@ export function AgentPage() {
           {pendingAdd && routePlan && (
             <div className="ta-clarify-card">
               <div className="ta-clarify-title">安排「{pendingAdd.title}」</div>
-              <div className="ta-clarify-row">
+              <div className="ta-clarify-row ta-add-schedule-row">
                 <label>日期
                   <select value={addDay} onChange={(event) => setAddDay(Number(event.target.value))} disabled={planning}>
                     {Array.from({ length: getPlanDayCount(routePlan) }, (_, index) => index + 1)
@@ -1650,9 +1662,25 @@ export function AgentPage() {
         <section className="ta-plan-card ta-plan-column">
           {expandedStyle && routePlan ? (
             <div className="ta-plan-detail">
-              <button type="button" className="ta-plan-detail-back" onClick={() => setExpandedStyle(null)}>
-                ← 返回方案列表
-              </button>
+              <div className="ta-plan-detail-toolbar">
+                <span className="ta-plan-detail-toolbar-label">旅行计划</span>
+                {routePlan.styles.length > 1 && (
+                  <div className="ta-plan-style-switch" role="group" aria-label="切换旅行方案">
+                    {routePlan.styles.map(style => (
+                      <button
+                        key={style}
+                        type="button"
+                        className={expandedStyle === style ? 'active' : ''}
+                        aria-pressed={expandedStyle === style}
+                        onClick={() => chooseStyle(style)}
+                        disabled={planning}
+                      >
+                        {style}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="ta-plan-detail-title">
                 <strong>{expandedStyle}</strong>
                 <p>{routePlan.summaries[expandedStyle] ?? ''}</p>
@@ -1905,31 +1933,7 @@ export function AgentPage() {
           ) : (
             <div className="ta-plan-empty">
               {routePlan && routePlan.styles.length > 0 ? (
-                <div className="ta-plan-styles">
-                  <div className="ta-plan-styles-hint">选择一个方案查看详情</div>
-                  {routePlan.styles.map((style) => (
-                    <button
-                      key={style}
-                      type="button"
-                      className={`ta-plan-style-card${
-                        expandedStyle === style ? ' active' : ''
-                      }${routePlan.suggestions?.cover_image ? ' has-image' : ''}`}
-                      style={
-                        routePlan.suggestions?.cover_image
-                          ? ({
-                              '--cover-image': `url("${routePlan.suggestions.cover_image}")`,
-                            } as CSSProperties)
-                          : undefined
-                      }
-                      onClick={() => chooseStyle(style)}
-                    >
-                      <span className="ta-plan-style-name">{style}</span>
-                      <p className="ta-plan-style-summary">
-                        {routePlan.summaries[style] ?? ''}
-                      </p>
-                    </button>
-                  ))}
-                </div>
+                <div className="ta-plan-loading">正在整理方案详情…</div>
               ) : (
                 <>
                   <div>先在左侧描述旅行需求，生成后可把右侧候选加入行程。</div>
@@ -2105,15 +2109,20 @@ export function AgentPage() {
       </div>
 
       {/* 悬浮地图：拖动标题栏可以自由移动 */}
-      {(routePlan || reviewProgress) && <PlanReviewWindow
+      <PlanReviewWindow
+        mapDock={isMapExpanded ? getMapDockPosition() : mapPosition}
         plan={routePlan ?? {blocks:[],review_pending:planning}} busy={planning} progress={reviewProgress}
-        onLocate={locateReviewIssue} onRetry={() => void retryReview()} onRepair={() => void retryReview()} />}
+        onLocate={locateReviewIssue} onRetry={() => void retryReview()} onRepair={() => void retryReview()} />
 
       {isMapHidden && (
         <button
           type="button"
           className="ta-map-side-tab"
-          onClick={() => setIsMapHidden(false)}
+          onClick={() => {
+            setMapPosition(getMapDockPosition());
+            setIsMapExpanded(false);
+            setIsMapHidden(false);
+          }}
           aria-label="显示地图"
         >
           <span className="ta-map-side-arrow">◀</span>

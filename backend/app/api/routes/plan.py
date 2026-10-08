@@ -1,9 +1,13 @@
 import asyncio
 import copy
+import hashlib
 import json
 import os
+import queue
 import re
 import signal
+import threading
+import time
 import importlib.util
 import subprocess
 import sys
@@ -16,27 +20,34 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 ROOT = Path(__file__).resolve().parents[4]
-sys.path.insert(0, str(ROOT))
+
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from agent_env import component_python, subprocess_env
+
 from shared.audit import failed_audit, history_entry, next_plan_revision, normalize_audit, without_review
 from shared.sources import merge_plan_sources
 
 ORCHESTRATOR_PY = ROOT / "Orchestrator" / "orchestrator.py"
-ORCHESTRATOR_PYTHON = ROOT / "Orchestrator" / ".venv" / "bin" / "python"
+ORCHESTRATOR_PYTHON = component_python("Orchestrator")
 SEARCH_PY = ROOT / "SearchAgent" / "search.py"
-SEARCH_PYTHON = ROOT / "SearchAgent" / ".venv" / "bin" / "python"
+SEARCH_PYTHON = component_python("SearchAgent")
 PLAN_PY = ROOT / "PlanAgent" / "plan.py"
-PLAN_PYTHON = ROOT / "PlanAgent" / ".venv" / "bin" / "python"
+PLAN_PYTHON = component_python("PlanAgent")
 VALIDATE_PY = ROOT / "ValidateAgent" / "validate.py"
-VALIDATE_PYTHON = ROOT / "ValidateAgent" / ".venv" / "bin" / "python"
+VALIDATE_PYTHON = component_python("ValidateAgent")
 
 router = APIRouter(prefix="/plan", tags=["plan"])
 
 
 def _subprocess_env() -> dict:
-    """避免 macOS 启动器变量污染子进程的 venv 解析。"""
-    env = dict(os.environ)
-    env.pop("__PYVENV_LAUNCHER__", None)
-    return env
+    """子进程环境：UTF-8 标准流 + 清理 macOS venv 遗留变量。
+
+    必须与父进程的 encoding="utf-8" 配套，否则子进程会按 GBK 输出中文，
+    父进程按 UTF-8 解码即抛 UnicodeDecodeError。
+    """
+    return subprocess_env()
 
 
 class PlanRequest(BaseModel):
@@ -61,6 +72,8 @@ def _run_json(python: Path, script: Path, data: dict | str, timeout: int = 120, 
             input=data if isinstance(data, str) else json.dumps(data, ensure_ascii=False),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=_subprocess_env(),
             timeout=timeout,
         )
@@ -509,22 +522,125 @@ def _replace_existing_stop(blocks: list[dict], item: dict, selected: list[dict])
 
 
 async def _stop_process_group(proc) -> None:
-    if proc.returncode is not None:
-        return
-    try:
-        os.killpg(proc.pid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
-        if proc.returncode is None:
-            proc.terminate()
-    try:
-        await asyncio.wait_for(proc.wait(), timeout=2)
-    except asyncio.TimeoutError:
+    """终止子进程；POSIX 下连同进程组一起清理。
+
+    注意：这里接收的是 ``subprocess.Popen``（见 ``_run_stream_process``），
+    它的 ``wait()`` 是同步方法、返回退出码，必须放进线程里 await。
+    Windows 没有 os.killpg，且那里用不到进程组，因此按平台分支处理。
+    """
+
+    async def _wait(timeout: float) -> bool:
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            if proc.returncode is None:
-                proc.kill()
-        await proc.wait()
+            await asyncio.wait_for(asyncio.to_thread(proc.wait), timeout=timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
+
+    if proc.poll() is not None:
+        return
+
+    if os.name == "posix":
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, AttributeError):
+            try:
+                proc.terminate()
+            except OSError:
+                pass
+        if not await _wait(2):
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, AttributeError):
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+            await _wait(2)
+        return
+
+    # Windows：先温和终止，再强杀
+    try:
+        proc.terminate()
+    except OSError:
+        pass
+    if not await _wait(2):
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        await _wait(2)
+
+
+async def _run_stream_process(
+    argv: list[str], data: dict, holder: dict, timeout_s: float = 900.0
+):
+    """跨平台流式执行子进程，逐行产出 stdout（bytes）。
+
+    不使用 ``asyncio.create_subprocess_exec``：Windows 上 uvicorn 以 ``--reload``
+    启动时会选用 Selector 事件循环，其 ``_make_subprocess_transport`` 直接抛
+    ``NotImplementedError``。改为线程读取 ``subprocess.Popen`` 的管道，
+    对事件循环实现没有任何要求。
+
+    进程写入 ``holder["proc"]``，由调用方在客户端断开时回收
+    （``aclose()`` 不会把 GeneratorExit 传进本生成器，故清理不能只放这里）。
+    """
+    kwargs: dict = dict(
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=_subprocess_env(),
+    )
+    if os.name == "posix":
+        kwargs["start_new_session"] = True  # 便于整组清理
+    proc = subprocess.Popen(argv, **kwargs)
+    holder["proc"] = proc
+
+    out_queue: queue.Queue = queue.Queue()
+    EOF = object()  # stdout 关闭 -> 子进程已产出全部输出
+
+    def read_stream(stream, tag: str) -> None:
+        try:
+            for raw in iter(stream.readline, b""):
+                out_queue.put((tag, raw))
+        except (OSError, ValueError):
+            pass
+        finally:
+            # stdout 关闭是最可靠的结束信号。不能"等到某个 sentinel 才退出"：
+            # 子进程派生的孙进程会继承管道并长时间持有，而空队列上的短超时轮询
+            # 并不可靠（主线程持锁时 queue.get 可能不按时返回），会让流永不关闭，
+            # 前端必须点"停止"才能渲染结果。
+            if tag == "out":
+                out_queue.put(("out", EOF))
+
+    for stream, tag in ((proc.stdout, "out"), (proc.stderr, "err")):
+        threading.Thread(target=read_stream, args=(stream, tag), daemon=True).start()
+
+    def write_stdin() -> None:
+        try:
+            assert proc.stdin is not None
+            proc.stdin.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+            proc.stdin.close()
+        except (OSError, ValueError, AssertionError):
+            pass
+
+    threading.Thread(target=write_stdin, daemon=True).start()
+
+    deadline = time.monotonic() + timeout_s
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise asyncio.TimeoutError
+        try:
+            tag, item = await asyncio.to_thread(
+                out_queue.get, True, min(0.5, remaining)
+            )
+        except queue.Empty:
+            continue
+        if item is EOF:
+            break
+        if tag == "err":
+            continue  # 仅排空管道，避免写满阻塞子进程
+        yield item
 
 
 @router.post("/stream")
@@ -544,44 +660,35 @@ def city_guide_stream(payload: PlanRequest):
 
 def _orchestrator_stream(data: dict, repair=False, guide=False):
     async def event_stream():
-        proc = None
-        stderr_task = None
+        holder: dict = {}
+        argv = (
+            [str(SEARCH_PYTHON), str(SEARCH_PY), "--guide-stream"]
+            if guide
+            else [
+                str(ORCHESTRATOR_PYTHON),
+                str(ORCHESTRATOR_PY),
+                "--stream",
+                *(["--repair"] if repair else []),
+            ]
+        )
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *([str(SEARCH_PYTHON), str(SEARCH_PY), "--guide-stream"] if guide else
-                  [str(ORCHESTRATOR_PYTHON), str(ORCHESTRATOR_PY), "--stream", *(["--repair"] if repair else [])]),
-                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                env=_subprocess_env(), start_new_session=True, limit=4 * 1024 * 1024,
-            )
-            # 并发排空 stderr，避免日志写满管道导致整个规划停住。
-            async def drain_stderr():
-                while await proc.stderr.read(8192):
-                    pass
-            stderr_task = asyncio.create_task(drain_stderr())
-            proc.stdin.write(json.dumps(data, ensure_ascii=False).encode())
-            await proc.stdin.drain()
-            proc.stdin.close()
-            while True:
-                line = await asyncio.wait_for(proc.stdout.readline(), timeout=600)
-                if not line:
-                    break
-                line = line.decode("utf-8").rstrip("\r\n")
+            async for raw in _run_stream_process(argv, data, holder):
+                line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
                 if line:
                     yield f"data: {line}\n\n"
-            await proc.wait()
-            if proc.returncode:
-                yield f"data: {json.dumps({'type': 'error', 'error': '规划服务执行失败，请重试'}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
-        except (asyncio.TimeoutError, OSError, ValueError) as exc:
-            message = "规划处理超时，请重试" if isinstance(exc, asyncio.TimeoutError) else "规划服务暂时不可用，请重试"
-            yield f"data: {json.dumps({'type': 'error', 'error': message}, ensure_ascii=False)}\n\n"
+        except asyncio.TimeoutError:
+            yield f"data: {json.dumps({'type': 'error', 'error': '规划处理超时，请重试'}, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+        except (OSError, ValueError):
+            yield f"data: {json.dumps({'type': 'error', 'error': '规划服务暂时不可用，请重试'}, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
         finally:
+            # 客户端断开时 aclose() 不会把 GeneratorExit 传播进被 async for
+            # 挂起的内层生成器，因此必须在这里显式回收子进程。
+            proc = holder.get("proc")
             if proc is not None:
                 await _stop_process_group(proc)
-            if stderr_task is not None:
-                stderr_task.cancel()
-                await asyncio.gather(stderr_task, return_exceptions=True)
 
     return StreamingResponse(event_stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"})
 

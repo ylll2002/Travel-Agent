@@ -7,6 +7,7 @@ import { TripQuestions } from '../components/TripQuestions';
 import type { TripQuestion } from '../components/TripQuestions';
 import { usePlanStream } from '../hooks/usePlanStream';
 import { advanceReviewProgress, canAutoRepair, confirmationReason, currentAudit, issueTarget, reviewMessage } from '../lib/planReview';
+import CityGuide from '../components/CityGuide';
 import { PlanReviewWindow } from '../components/PlanReviewWindow';
 import type { AuditIssue, PlanAudit, ReviewContext, ReviewProgress } from '../lib/planReview';
 
@@ -488,6 +489,16 @@ export function AgentPage() {
   const committedSearchRef = useRef<Record<string, unknown>>({});
   const requestControllerRef = useRef<(AbortController & { mutation?: boolean }) | null>(null);
   const [planning, setPlanning] = useState(false);
+  const [generation, setGeneration] = useState<{id:number; destination:string; progress:number; status:'running'|'complete'|'stopped'} | null>(null);
+  useEffect(() => {
+    if (!planning) setGeneration(previous => previous?.status === 'running' ? {...previous, status:'stopped'} : previous);
+  }, [planning]);
+  useEffect(() => {
+    if (!planning) return;
+    const timer = window.setInterval(() => setGeneration(previous => previous?.status === 'running'
+      ? {...previous, progress:Math.max(previous.progress, Math.min(94, previous.progress + 1))} : previous), 5000);
+    return () => window.clearInterval(timer);
+  }, [planning]);
   const [reviewProgress, setReviewProgress] = useState<ReviewProgress | null>(null);
   const [mapPosition, setMapPosition] = useState(() => {
     if (typeof window === 'undefined') return { x: 760, y: 520 };
@@ -750,6 +761,7 @@ export function AgentPage() {
 
   async function runPlan(payload: Record<string, unknown>) {
     const version = ++planRequestVersionRef.current;
+    setGeneration({id:version, destination:String(payload.destination ?? ''), progress:5, status:'running'});
     setPlanning(true);
     setReviewProgress(advanceReviewProgress(null, {stage:'planning',repair_count:0}));
     setRoutePlan(previous => previous ? {...previous,audit:null,review_pending:true} : previous);
@@ -757,7 +769,13 @@ export function AgentPage() {
     setSelectedBlocks(new Set());
     await startPlanStream(payload, event => {
       if (version !== planRequestVersionRef.current) return;
-      if (event.type === 'node') { receiveWorkflowEvent(event.data); return; }
+      if (event.type === 'node') {
+        const data = event.data;
+        const target = data.node === 'search' ? 35 : data.stage === 'reviewing' ? 65 + Number(data.repair_count ?? 0) * 10
+          : data.stage === 'repairing' ? 70 + Number(data.repair_count ?? 0) * 10 : 5;
+        setGeneration(previous => previous ? {...previous, progress:Math.max(previous.progress, Math.min(95, target))} : previous);
+        receiveWorkflowEvent(data); return;
+      }
       if (event.type === 'error') {
         workflowFailed(event.error);
         updateLastAssistantMessage('本次处理未完成，现有行程已保留，请查看审核窗口。');
@@ -772,6 +790,7 @@ export function AgentPage() {
       }
       const snapshot = publishPlanSnapshot(raw,false);
       if (!snapshot || !snapshot.audit) {workflowFailed('未收到完整行程和有效审核结论，请重试。'); return;}
+      setGeneration(previous => previous ? {...previous, progress:100, status:'complete'} : previous);
       const workflow = raw.workflow as Record<string,unknown> | undefined;
       setReviewProgress(previous => advanceReviewProgress(previous, {stage:snapshot.audit?.status ?? 'error',plan:snapshot,
         audit:snapshot.audit,...workflow,repair_count:workflow?.repair_count}));
@@ -1534,6 +1553,8 @@ export function AgentPage() {
                 </div>
               ) : null;
             })()}
+            {generation && <CityGuide key={generation.id} destination={generation.destination}
+              progress={generation.progress} status={generation.status} />}
           </div>
 
           {question && (
